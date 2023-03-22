@@ -43,10 +43,23 @@ colors = [
 class PaintApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        #brush settings
+        self.brush_sizes=[3,7,11,15]
+        self.select_color_widgets=[]
         self.brushesh_is_closed=True
+        self.new_color_counter=0
+        self.selected_color=1
+        
+        self.last_x, self.last_y = None, None
+        self.draw_color = "black"
+        self.draw_size = 3
+        self.is_drawing = False
 
+        #main window settings
         self.title("Paint")
         self.geometry("800x600")
+        self.attributes('-fullscreen', False)
+        self.bind("<Escape>", lambda event: self.destroy())
 
         # Create a toolbar frame and buttons
         self.toolbar = tk.Frame(self, bd=1, relief=tk.RAISED,border=1)
@@ -81,7 +94,13 @@ class PaintApp(tk.Tk):
 
         #White canvas
         self.canvas = tk.Canvas(self, bg='white')
-        self.canvas.grid(row=1, column=0, columnspan=len(colors)+1, sticky="nsew")
+        self.canvas.grid(row=1, column=0, sticky="nsew")
+
+
+        self.canvas.bind("<B1-Motion>", self.draw)
+        self.canvas.bind("<ButtonPress-1>", self.start_draw)
+        self.canvas.bind("<ButtonRelease-1>", self.stop_draw)
+        print(self.select_color_widgets[0].winfo_children()[0])
 
         # Configure grid weights to expand the canvas and toolbar when the window is resized
         self.rowconfigure(1, weight=1)
@@ -298,7 +317,7 @@ class PaintApp(tk.Tk):
 
         # Add the options as buttons to the menu
         for i in range(4):
-            menu.add_command(label="", image=self.image_objects[i], compound="center", command=lambda: selected_option.set("Size"))
+            menu.add_command(label="", image=self.image_objects[i], compound="center", command=lambda index=i: self.change_brush_size(index))
             menu.entryconfigure(i, image=self.image_objects[i], compound="center", font=("Arial", 12))
 
         #Icon image
@@ -309,22 +328,26 @@ class PaintApp(tk.Tk):
         # Configure the Menubutton widget to display the menu
         option_menu.configure(menu=menu)
         option_menu.config(image=self.icon_image, compound="top")
-
+    
     def selected_colors_widget(self,text,color,bordercolor):
         color_frame = tk.Frame(self.toolbar, padx=10, pady=2,highlightthickness=1,highlightbackground=bordercolor)
+        color_frame.bind("<Button-1>",lambda event:self.change_draw_color(self,text))
         color_frame.pack(side=tk.LEFT, padx=2)
 
         # Duplicate of the first color canvas
         color_canvas = tk.Canvas(color_frame, width=25, height=25,background=color, highlightthickness=1, highlightbackground="black")
+        color_canvas.bind("<Button-1>",lambda event:self.change_draw_color(self,text))
         color_canvas.pack()
 
         # Duplicate of the first color label
         color_label = tk.Label(color_frame, text=text)
+        color_label.bind("<Button-1>",lambda event:self.change_draw_color(self,text))
         color_label.pack()
+        self.select_color_widgets.append(color_frame)
     
     def edit_colors_widget(self):
         self.color_palete_img = PhotoImage(file="images/others/raindbow.png")
-        self.draw_button = tk.Button(self.toolbar,image=self.color_palete_img, compound="top", text='Edit\n colors')
+        self.draw_button = tk.Button(self.toolbar,image=self.color_palete_img, compound="top", text='Edit\n colors',command=self.pick_color)
         self.draw_button.pack(side=tk.LEFT, padx=2)
    
     def color_palete_widget(self):
@@ -348,7 +371,47 @@ class PaintApp(tk.Tk):
             canvas.bind("<Button-1>",self.get_background_color)
             canvas.bind("<Enter>", lambda event, canvas=canvas: canvas.config(highlightthickness=2))
             canvas.bind("<Leave>", lambda event, canvas=canvas: canvas.config(highlightthickness=1))
+ 
+    def start_draw(self, event):
+        self.is_drawing = True
+        self.last_x, self.last_y = event.x, event.y
 
+    def stop_draw(self, event):
+        self.is_drawing = False
+
+    def draw(self, event):
+        if self.is_drawing:
+            if self.last_x and self.last_y:
+                self.canvas.create_line(self.last_x, self.last_y, event.x, event.y,
+                    width=self.draw_size, fill=self.draw_color, capstyle=tk.ROUND, smooth=tk.TRUE)
+
+            self.last_x, self.last_y = event.x, event.y
+
+    def change_brush_size(self,index):
+        self.draw_size = self.brush_sizes[index]
+
+    def pick_color(self):
+        color = askcolor()
+        self.draw_color = color[1]
+
+    def change_draw_color(self,event,text):
+        color_box=None
+        frame1 = self.select_color_widgets[0]
+        frame2 = self.select_color_widgets[1]
+        if text == "Color\n 1":
+            color_box = self.nametowidget(str(self.select_color_widgets[0].winfo_children()[0]))
+            self.selected_color=1
+            frame1.config(highlightthickness=1, highlightbackground="#00a2e8")
+            frame2.config(highlightthickness=1, highlightbackground="#FFFFFF")
+        else:
+            color_box = self.nametowidget(str(self.select_color_widgets[1].winfo_children()[0]))
+            self.selected_color=2
+            frame1.config(highlightthickness=1, highlightbackground="#FFFFFF")
+            frame2.config(highlightthickness=1, highlightbackground="#00a2e8")
+
+        self.draw_color = color_box.cget("background")
+        frame1.config(highlightthickness=1, highlightbackground="#00a2e8")
+        frame2.config(highlightthickness=1, highlightbackground="#FFFFFF")
 if __name__ == '__main__':
     app = PaintApp()
     app.mainloop()
