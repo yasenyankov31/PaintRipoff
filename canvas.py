@@ -401,9 +401,6 @@ class CanvasImage:
         self.__imframe.destroy()
      
  
-     
- 
-
 class MainWindow(ttk.Frame):
     """ Main window class """
     def __init__(self, mainframe, path):

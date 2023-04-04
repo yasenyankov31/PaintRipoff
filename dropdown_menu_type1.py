@@ -1,6 +1,4 @@
 import tkinter as tk
-from PIL import ImageTk, Image
-import os 
 
 class DropdownMenu:
     def __init__(self, master, images):
@@ -8,6 +6,8 @@ class DropdownMenu:
         self.images = images
         self.options_window=None
         self.button_is_pressed=False
+        self.index=0
+
 
         # Create the button
         self.button = tk.Button(self.master,image=self.images[0], text='Brushes',compound="top")
@@ -65,4 +65,5 @@ class DropdownMenu:
         
     def select_option(self, index):
         self.button.configure(image=self.images[index])
+        self.index=index
         self.options_window.destroy()

@@ -1,6 +1,4 @@
 import tkinter as tk
-from PIL import ImageTk, Image
-import os 
 
 class DropdownMenu:
     def __init__(self, master, images,options_text,size,button):
@@ -55,32 +53,4 @@ class DropdownMenu:
     def select_option(self):
         self.options_window.destroy()
         
-# if __name__ == '__main__':
-#     root = tk.Tk()
-#     root.title('Dropdown Menu Example')
-#     sqaure_size=25
-#     #load images
-#     folder="images/rotations/"
-#     shapes_icons=[]
-#     labels=["Rotate right 90°",
-#             "Rotate left 90°",
-#             "    Rotate 180°",
-#             "   Flip vertical",
-#             "Flip horizontal"]
-#     images = os.listdir(folder)
 
-#     for x in range(len(images)):
-#         image=folder+images[x]
-#         img = Image.open(image)
-#         img = img.resize((sqaure_size, sqaure_size))
-#         shapes_icons.append(ImageTk.PhotoImage(img))
-#     #button for dropdown menu
-#     button = tk.Button(root,image=shapes_icons[0],compound="left", text='Rotate')
-#     dropdown = DropdownMenu(root, shapes_icons,labels,'130x170',button)
-#     # Create the button
-    
-#     button.bind("<ButtonPress>", dropdown.on_press_button)
-#     button.bind("<ButtonRelease>", dropdown.on_realease_button)
-#     root.bind("<Button-1>", dropdown.force_close)
-#     button.pack()
-#     root.mainloop()

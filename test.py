@@ -2,8 +2,11 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import PhotoImage
 from tkinter.colorchooser import askcolor
-from PIL import ImageTk, Image
+from PIL import ImageTk, Image, ImageColor,ImageDraw,ImageGrab
 import os
+import random
+
+
 import dropdown_menu_type1
 import dropdown_menu_type2
 
@@ -43,6 +46,7 @@ colors = [
 class PaintApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.rects=[]
         #brush settings
         self.brush_sizes=[3,7,11,15]
         self.select_color_widgets=[]
@@ -54,6 +58,10 @@ class PaintApp(tk.Tk):
         self.draw_color = "black"
         self.draw_size = 3
         self.is_drawing = False
+
+        #shapes
+        self.ellipse = None
+        self.elpise_counter=0
 
         #main window settings
         self.title("Paint")
@@ -100,7 +108,6 @@ class PaintApp(tk.Tk):
         self.canvas.bind("<B1-Motion>", self.draw)
         self.canvas.bind("<ButtonPress-1>", self.start_draw)
         self.canvas.bind("<ButtonRelease-1>", self.stop_draw)
-        print(self.select_color_widgets[0].winfo_children()[0])
 
         # Configure grid weights to expand the canvas and toolbar when the window is resized
         self.rowconfigure(1, weight=1)
@@ -144,11 +151,6 @@ class PaintApp(tk.Tk):
         self.copy_image = PhotoImage(file="images/others/copy.png")
         button_copy = tk.Button(self.copy_panel,image=self.copy_image,compound="left",text=f"Copy",bd=0)
         button_copy.grid(row=1, column=0, padx=5)
-
-    def get_background_color(self, event):
-        canvas = event.widget
-        color = canvas.cget("background")
-        print(color)
     
     def resize_widget(self):
         sqaure_size=15
@@ -227,8 +229,8 @@ class PaintApp(tk.Tk):
             img = img.resize((sqaure_size, sqaure_size))
             shapes_icons.append(ImageTk.PhotoImage(img))
         
-        menu=dropdown_menu_type1.DropdownMenu(self.toolbar, shapes_icons)
-        self.bind("<Button-1>", menu.force_close, add="+")
+        self.brush_menu=dropdown_menu_type1.DropdownMenu(self.toolbar, shapes_icons)
+        self.bind("<Button-1>", self.brush_menu.force_close, add="+")
 
     def shapes_widget(self):
         self.shapes_panel = tk.Frame(self.toolbar, bd=1, relief=tk.SUNKEN)
@@ -256,10 +258,13 @@ class PaintApp(tk.Tk):
                 row += 1
                 column = 0
             column += 1
-            button = tk.Button(self.shapes_panel,image=self.shapes_icons[i],height=sqaure_size,width=sqaure_size,bd=0)
+            button = tk.Button(self.shapes_panel,image=self.shapes_icons[i],height=sqaure_size,width=sqaure_size,bd=0,command=lambda img=image:self.select_shape(img))
             button.grid(row=row, column=column, padx=5, pady=5)
         label = tk.Label(self.shapes_panel, text="Shapes")
         label.grid(row=3,column=4)
+    
+    def select_shape(self,shape):
+        self.brush_menu.index=str(shape).replace('.png','')
 
     def tools_widget(self):
         self.tools_panel = tk.Frame(self.toolbar, bd=0, relief=tk.SUNKEN)
@@ -352,8 +357,8 @@ class PaintApp(tk.Tk):
    
     def color_palete_widget(self):
         # Create a color selection panel
-        self.panel = tk.Frame(self.toolbar, bd=1, relief=tk.SUNKEN)
-        self.panel.pack(side=tk.LEFT, padx=5, pady=5)
+        self.color_palete_panel = tk.Frame(self.toolbar, bd=1, relief=tk.SUNKEN)
+        self.color_palete_panel.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Add color selection canvases to the panel
         row = 0
@@ -366,26 +371,108 @@ class PaintApp(tk.Tk):
             column += 1
             r,g,b=color
             color_hex = f'#{r:02x}{g:02x}{b:02x}'
-            canvas = tk.Canvas(self.panel, width=15, height=15, background=color_hex, highlightthickness=1, highlightbackground="black")
+            canvas = tk.Canvas(self.color_palete_panel, width=15, height=15, background=color_hex, highlightthickness=1, highlightbackground="black")
             canvas.grid(row=row, column=column, padx=1, pady=1)
-            canvas.bind("<Button-1>",self.get_background_color)
-            canvas.bind("<Enter>", lambda event, canvas=canvas: canvas.config(highlightthickness=2))
-            canvas.bind("<Leave>", lambda event, canvas=canvas: canvas.config(highlightthickness=1))
+            canvas.bind("<Button-1>",self.get_from_palete_background_color)
+            # canvas.bind("<Enter>", lambda event, canvas=canvas: canvas.config(highlightthickness=2))
+            # canvas.bind("<Leave>", lambda event, canvas=canvas: canvas.config(highlightthickness=1))
  
     def start_draw(self, event):
         self.is_drawing = True
         self.last_x, self.last_y = event.x, event.y
+        self.ellipse = (event.x, event.y, event.x, event.y)
 
     def stop_draw(self, event):
         self.is_drawing = False
+        x0, y0, x1, y1 = self.ellipse
+        self.elpise_counter+=1
+        self.canvas.create_oval(x0, y0, x1, y1,width=self.draw_size, outline=self.draw_color, tags=f"ellipse{self.elpise_counter}")
+        #self.save_canvas("images/canvas/temp.png")
+    
+    def save_canvas(self, file_name):
+        ImageGrab.grab(bbox=(
+            self.canvas.winfo_rootx(),
+            self.canvas.winfo_rooty(),
+            self.canvas.winfo_rootx() + self.canvas.winfo_width(),
+            self.canvas.winfo_rooty() + self.canvas.winfo_height()
+        )).save(file_name)
+        self.canvas.delete("all")
+
+
+        image = Image.open(file_name)
+        background_image = Image.open('images/canvas/white_canvas.png')
+        background_image.paste(image, (0, 0))
+
+        # Save the modified image
+        background_image.save(file_name)
+
+        self.canvas_img = PhotoImage(file=file_name)
+        self.canvas.create_image(0, 0, anchor="nw", image=self.canvas_img)
 
     def draw(self, event):
         if self.is_drawing:
-            if self.last_x and self.last_y:
-                self.canvas.create_line(self.last_x, self.last_y, event.x, event.y,
-                    width=self.draw_size, fill=self.draw_color, capstyle=tk.ROUND, smooth=tk.TRUE)
+            match self.brush_menu.index:
+                case 0:
+                    self.default_brush(event)
+                case 1:
+                    self.spray_brush(event)
+                case 2:
+                    self.calligraphy_brush(event)
+                case 3:
+                    self.oil_brush(event)
+                case 'circle':
+                    self.ellipse = (self.ellipse[0], self.ellipse[1], event.x, event.y)
+                    self.draw_ellipse()
 
-            self.last_x, self.last_y = event.x, event.y
+    def draw_ellipse(self):
+        # Draw the ellipse on the canvas
+        if self.canvas.find_withtag("ellipse"):
+            self.canvas.delete("ellipse")
+        if self.ellipse:
+            x0, y0, x1, y1 = self.ellipse
+            self.canvas.create_oval(x0, y0, x1, y1,width=self.draw_size, outline=self.draw_color, tags="ellipse")                
+
+    def default_brush(self,event):
+        if self.last_x and self.last_y:
+            self.canvas.create_line(self.last_x, self.last_y, event.x, event.y,
+                width=self.draw_size, fill=self.draw_color, capstyle=tk.ROUND, smooth=tk.TRUE)
+
+        self.last_x, self.last_y = event.x, event.y
+
+    def spray_brush(self,event):
+        x, y = event.x, event.y
+        for i in range(5):
+            r = random.randint(1, 2)
+            x1 = x + random.randint(-20, self.draw_size)
+            y1 = y + random.randint(-20, self.draw_size)
+            self.canvas.create_oval(x1-r, y1-r, x1+r, y1+r, fill=self.draw_color, outline='')
+
+    def calligraphy_brush(self,event):
+        brush_size = self.draw_size
+        x1, y1 = (event.x - brush_size), (event.y - brush_size)
+        x2, y2 = (event.x + brush_size), (event.y + brush_size)
+        self.canvas.create_line(x1, y1, x2, y2, fill=self.draw_color, width=brush_size, capstyle="round", smooth=True)
+
+    def oil_brush(self, event):
+        x1, y1 = (event.x - self.draw_size), (event.y - self.draw_size)
+        x2, y2 = (event.x + self.draw_size), (event.y + self.draw_size)
+        #self.canvas.create_oval(x1, y1, x2, y2, fill=self.draw_color, outline='', width=self.draw_size, stipple="gray50")
+        self.create_transperant_oval(x1, y1, x2, y2, fill= self.draw_color, alpha= .2)
+
+    def create_transperant_oval(self,x,y,a,b,**options):
+        if 'alpha' in options:
+            # Calculate the alpha transparency for every color(RGB)
+            alpha = int(options.pop('alpha') * 255)
+            # Use the fill variable to fill the shape with transparent color
+            fill = options.pop('fill')
+            fill =ImageColor.getcolor(self.nametowidget(str(self.select_color_widgets[self.selected_color-1].winfo_children()[0])).cget("background") , "RGB") + (alpha,)
+            image = Image.new('RGBA', (a-x, b-y), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((0, 0, a-x, b-y), fill=fill)
+
+            self.rects.append(ImageTk.PhotoImage(image))
+            self.canvas.create_image(x, y, image=self.rects[-1], anchor='nw')
+            self.canvas.create_oval(x, y,a,b,outline='', **options)
 
     def change_brush_size(self,index):
         self.draw_size = self.brush_sizes[index]
@@ -393,8 +480,19 @@ class PaintApp(tk.Tk):
     def pick_color(self):
         color = askcolor()
         self.draw_color = color[1]
+        #add to the color palete
+        self.new_color_counter+=1
+        self.nametowidget(str(self.color_palete_panel)+f".!canvas{self.new_color_counter+20}").configure(background=color[1])
+        self.nametowidget(str(self.select_color_widgets[self.selected_color-1].winfo_children()[0])).configure(background=self.draw_color)  
 
-    def change_draw_color(self,event,text):
+        if self.new_color_counter==10:
+            self.new_color_counter=0
+    
+    def get_from_palete_background_color(self, event):
+        self.draw_color = event.widget.cget("background")
+        self.nametowidget(str(self.select_color_widgets[self.selected_color-1].winfo_children()[0])).configure(background=self.draw_color)
+
+    def change_draw_color(self,_,text):
         color_box=None
         frame1 = self.select_color_widgets[0]
         frame2 = self.select_color_widgets[1]
@@ -410,8 +508,7 @@ class PaintApp(tk.Tk):
             frame2.config(highlightthickness=1, highlightbackground="#00a2e8")
 
         self.draw_color = color_box.cget("background")
-        frame1.config(highlightthickness=1, highlightbackground="#00a2e8")
-        frame2.config(highlightthickness=1, highlightbackground="#FFFFFF")
+
 if __name__ == '__main__':
     app = PaintApp()
     app.mainloop()

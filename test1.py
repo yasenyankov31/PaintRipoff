@@ -1,71 +1,123 @@
-import tkinter as tk
+import pygame
+from PIL import Image, ImageDraw
 
-class DragDropButton(tk.Button):
-    def __init__(self,canvas, master, **kwargs):
-        super().__init__(master, **kwargs)
-        self.bind("<Button-1>", self.on_button_press)
-        self.bind("<B1-Motion>", self.on_move)
-        self.bind("<ButtonRelease-1>", self.on_button_release)
-        self.drag_start_x = 0
-        self.drag_start_y = 0
-        self.canvas=canvas
+width = 400
+height = 300
+image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
-    def on_button_press(self, event):
-        self.drag_start_x = event.x
-        self.drag_start_y = event.y
+# Draw a rectangle on the image
+draw = ImageDraw.Draw(image)
+draw.rectangle((50, 50, 150, 150), fill=(255, 0, 0, 255), outline=(0, 0, 0, 255))
 
-    def on_move(self, event):
-        self.master.delete("resize_rect")
-        self.canvas.delete("resize_rect")
-        x, y = self.winfo_x() - self.drag_start_x + event.x, self.winfo_y() - self.drag_start_y + event.y
-        self.place(x=x, y=y)
-        self.canvas.create_rectangle(0, 0, x, y,outline='black', fill="",tags="resize_rect")
-        self.master.create_rectangle(0, 0, x, y,outline='black', fill="",tags="resize_rect")
+# Save the image to a file (optional)
+image.save("rectangle.png")
+# Load the image
+image = pygame.image.load("rectangle.png")
 
-    def on_button_release(self, event):
-        x, y = self.winfo_x() - self.drag_start_x + event.x, self.winfo_y() - self.drag_start_y + event.y
-        self.canvas.delete("resize_rect")
-        self.master.delete("resize_rect")
-        self.canvas.config(width=x,height=y)
+# Rotate the image
+rotated_image = pygame.transform.rotate(image, 45)
 
-class ZoomCanvas(tk.Canvas):
-    def __init__(self, master, **kwargs):
-        super().__init__(master, **kwargs)
-        self.bind("<MouseWheel>", self.zoom)
+# Define Ellipse class
+class Shape:
+    def __init__(self, x, y, width, height, color, border_width=1):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.color = color
+        self.border_width = border_width
 
-    def zoom(self, event):
-        scale = 1.0
-        if event.delta > 0:
-            scale *= 1.1
+    def draw(self, surface):
+        #pygame.draw.ellipse(surface, self.color, (self.x, self.y, self.width, self.height), self.border_width)
+        screen.blit(rotated_image, (self.x, self.y))
+
+    def contains_point(self, x, y):
+        # Check if point (x, y) is within ellipse bounds
+        a = self.width / 2
+        b = self.height / 2
+        center_x = self.x + a
+        center_y = self.y + b
+        if ((x - center_x) ** 2) / (a ** 2) + ((y - center_y) ** 2) / (b ** 2) <= 1:
+            return True
         else:
-            scale /= 1.1
-        self.scale("all", 0,0, scale, scale)
+            return False
+        
+# Initialize Pygame
+pygame.init()
 
-root = tk.Tk()
-root.geometry('1000x800')
+# Set up the screen
+screen_width = 800
+screen_height = 600
+screen = pygame.display.set_mode((screen_width, screen_height),pygame.RESIZABLE)
 
-v_s = tk.Scrollbar(root, orient=tk.VERTICAL)
-v_s.pack(side=tk.RIGHT, fill=tk.Y)
+# Set up the ellipse
+shape_x = 0
+shape_y = 0
+shape_width = 0
+shape_height = 0
+shape_color = (0, 0, 0)
 
-h_s = tk.Scrollbar(root, orient=tk.HORIZONTAL)
-h_s.pack(side=tk.BOTTOM, fill=tk.X)
+# Set up the drawing flag
+drawing = False
 
-frame = tk.Canvas(root,background="gray")
-frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-canvas = ZoomCanvas(frame, background="white",width=600,height=400, scrollregion=(0, 0, 2000, 2000))
-canvas.pack(side=tk.LEFT, anchor="nw")
+shapes=[]
 
-button = DragDropButton(canvas,frame, text="Click Me!")
-button.pack(side=tk.LEFT,pady=400, anchor="nw")
 
-canvas.create_rectangle(50, 50, 150, 150, fill="red")
-canvas.create_rectangle(200, 50, 300, 100, fill="green")
-canvas.create_rectangle(250, 100, 350, 150, fill="blue")
+# Run the game loop
+while True:
+    # Handle events
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            # Quit the game
+            pygame.quit()
+            exit()
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Start drawing the ellipse
+            drawing = True
+            shape_x, shape_y = pygame.mouse.get_pos()
+        elif event.type == pygame.MOUSEBUTTONUP:
+            # Stop drawing the ellipse
+            drawing = False
+            if shape_width > 0 and shape_height > 0:
+                new_shape=Shape(shape_x, shape_y, shape_width, shape_height, shape_color)
+                shapes.append(new_shape)
+                #pygame.draw.ellipse(screen, shape_color, (shape_x, shape_y, shape_width, shape_height), 1)
+            if shape_width < 0 and shape_height < 0:
+                new_shape=Shape(shape_x + shape_width, shape_y + shape_height, abs(shape_width), abs(shape_height), shape_color)
+                shapes.append(new_shape)
+                #pygame.draw.ellipse(screen, shape_color, (shape_x + shape_width, shape_y + shape_height, abs(shape_width), abs(shape_height)), 1)    
+            elif shape_width < 0:
+                new_shape=Shape(shape_x + shape_width, shape_y, abs(shape_width), shape_height, shape_color)
+                shapes.append(new_shape)
+                #pygame.draw.ellipse(screen, shape_color, (shape_x + shape_width, shape_y, abs(shape_width), shape_height), 1)
+            elif  shape_height < 0:
+                new_shape=Shape(shape_x, shape_y + shape_height, shape_width, abs(shape_height), shape_color)
+                shapes.append(new_shape)
+                #pygame.draw.ellipse(screen, shape_color, (shape_x, shape_y + shape_height, shape_width, abs(shape_height)), 1)
 
-v_s.config(command=canvas.yview)
-h_s.config(command=canvas.xview)
+            shape_width = 0
+            shape_height = 0
+        elif event.type == pygame.MOUSEMOTION:
+            # Update the ellipse size while drawing
+            if drawing:
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                shape_width = mouse_x - shape_x
+                shape_height = mouse_y - shape_y
 
-canvas.config(xscrollcommand=h_s.set, yscrollcommand=v_s.set)
-
-root.mainloop()
+    # Draw the screen
+    screen.fill((255, 255, 255))
+    if drawing:
+        if shape_width > 0 and shape_height > 0:
+            pygame.draw.ellipse(screen, shape_color, (shape_x, shape_y, shape_width, shape_height), 1)
+        if shape_width < 0 and shape_height < 0:
+            pygame.draw.ellipse(screen, shape_color, (shape_x + shape_width, shape_y + shape_height, abs(shape_width), abs(shape_height)), 1)    
+        elif shape_width < 0:
+            pygame.draw.ellipse(screen, shape_color, (shape_x + shape_width, shape_y, abs(shape_width), shape_height), 1)
+        elif  shape_height < 0:
+            pygame.draw.ellipse(screen, shape_color, (shape_x, shape_y + shape_height, shape_width, abs(shape_height)), 1)
+    
+    for shape in shapes:
+        shape.draw(screen)
+   
+    pygame.display.flip()
