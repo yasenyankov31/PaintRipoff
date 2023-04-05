@@ -1,8 +1,9 @@
 import tkinter as tk
 from tkinter.colorchooser import askcolor
-from PIL import Image, ImageTk, ImageDraw
+from tkinter import filedialog
+from PIL import Image, ImageTk, ImageDraw,ImageGrab
 import os
-from scipy import ndimage
+
 
 COLORS = [
     (0, 0, 0),
@@ -278,7 +279,8 @@ class EditShapes:
 
         #selection variables
         self.shape_dragged=False
-        self.selected_shape_tag=None
+        self.selected_shapes_tag=[]
+        self.selected_shapes_init_size=[]
         self.click_shape_x,self.click_shape_y=0,0
         
         #move/drag variables
@@ -289,7 +291,8 @@ class EditShapes:
     #draw
     def start_draw(self,event):
         if len(self.canvas.find_withtag(tk.CURRENT))==0:
-            self.selected_shape_tag=None
+            self.selected_shapes_tag.clear()
+            self.selected_shapes_init_size.clear()
             self.shape_dragged=False
             self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
             
@@ -329,30 +332,73 @@ class EditShapes:
             self.canvas.tag_bind(image_object, "<B1-Motion>",lambda event,tag=tag: self.drag_shape(event,tag))
             self.selected_shape(event,tag)
             self.shape_dragged=False
-            self.selected_shape_tag=tag
             self.shape_counter+=1
         #delete selection rectangle
-        if self.selection_tool:
+        if self.selection_tool and not self.is_stretching:
             x0, y0, x1, y1 = self.selection_rectangle
             item_id=self.canvas.create_rectangle(x0, y0, x1, y1,tags="sel_rect")
             overlapping_items = self.canvas.find_overlapping(*self.canvas.bbox(item_id))
             overlapping_items = [tag for tag in overlapping_items if tag != item_id and self.canvas.type(tag) == "image"]
             for item in overlapping_items:
-                bbox=self.canvas.bbox(item)
-                self.canvas.create_rectangle(bbox, outline="red", tags="border", width=2,dash=(10,10))
+                tag = self.canvas.gettags(item)[0]
+                if tag not in self.selected_shapes_tag:
+                    self.selected_shapes_tag.append(tag)
+                if self.canvas.bbox(item) not in self.selected_shapes_init_size:
+                    self.selected_shapes_init_size.append(self.canvas.bbox(item))
+            if len(overlapping_items) > 1:
+                bbox_coords = [self.canvas.bbox(item) for item in overlapping_items]
+                x1, y1 = min(coord[0] for coord in bbox_coords), min(coord[1] for coord in bbox_coords)
+                x2, y2 = max(coord[2] for coord in bbox_coords), max(coord[3] for coord in bbox_coords)
+                width = x2 - x1
+                height = y2 - y1
+                
+                self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
+
+                stretch_btn_offset=10
+                x1_ = x1+(width/2)
+                y1_ = y1+height
+
+                self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
+                self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
+                self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+                
+
+                self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
+                self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
+                self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+                y1_ = y1+(height/2)
+                x1_ = x1+width
+
+                self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
+                self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
+                self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+                
+                
+
+                self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
+                self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
+                self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+            elif len(overlapping_items) == 1 and len(self.selected_shapes_tag)==1:
+                self.selected_shape(event, self.selected_shapes_tag[0])
 
             self.canvas.delete("sel_rect")
 
     def drag_draw(self, event):
         #draw selection rectangle
-        if not self.shape_dragged:
+        if not self.shape_dragged and not self.is_stretching:
             if self.selection_tool:
                 self.canvas.delete("sel_rect")
                 self.selection_rectangle = (self.selection_rectangle[0], self.selection_rectangle[1], event.x, event.y)
                 x0, y0, x1, y1 = self.selection_rectangle
                 self.canvas.create_rectangle(x0, y0, x1, y1, outline="red", tags="sel_rect", width=2,dash=(10,10))
 
-            elif not self.is_stretching:
+            else:
                 self.is_dragging=True
                 x, y = event.x - self.first_x, event.y - self.first_y
                 resized_image, invert_x, invert_y = self.shape.get_resized_image(x, y)
@@ -366,107 +412,84 @@ class EditShapes:
     #stretch after draw
     def enable_stretch(self,event):
         if not self.is_dragging:
+            self.canvas.delete("border")
             self.first_stretch_x=event.x
             self.first_stretch_y=event.y
             self.is_stretching=True
 
-    def calculate_stretch(self,tag,new_width,new_height,original_button,side,event):
-        self.image_widget=self.canvas.find_withtag(tag)[0]
-        x1, y1, x2, y2 = self.canvas.bbox(self.image_widget)
-        width = x2 - x1 + new_width
-        offsety=10
-        offsetx=10
-        
-        if side=="top":
-            height = y2 - y1 - new_height
-        else:
-            height = y2 - y1 + new_height
-
-        if height>1 and width>1:
-            img_specs=self.image_specs[self.selected_shape_tag]
-            match img_specs.shape_type:
-                case "star":
-                    self.shape.draw_star()
-                case "rectangle":
-                    self.shape.draw_rectangle()
-                case "circle":
-                    self.shape.draw_circle()
-                case "pentagon":
-                    self.shape.draw_pentagon()
-                case "arrow":
-                    self.shape.draw_arrow()
-                case "triangle":
-                    self.shape.draw_triangle()
-
-            self.rotated_image = self.shape.image.rotate(self.image_specs[tag].angle,expand=False).resize((width, height), Image.BILINEAR)
-            self.image_specs[tag].tk_image=ImageTk.PhotoImage(self.rotated_image)
-
-            if not self.delete_origin:
-                self.canvas.delete(tag,"border")
-                self.delete_origin=True
-                self.canvas.coords(original_button,0,0,0,0)
-                        
-
-            
-            self.last_stretch_x=x1
-            self.last_stretch_y=y1
-            if side=="bottom":
-                x1_ = x1+(width/2)
-                y1_ = y1+height
-            elif side=="right":
-                x1_ = x1+width
-                y1_ = y1+(height/2)
-            elif side=="left":
-                self.last_stretch_x=event.x
-                x1_ = event.x
-                x1=x1_
-                y1_ = y1+(height/2)
-                offsetx=-10
+    def calculate_stretch(self,event,new_width,new_height,button_tag):
+        for index, tag in enumerate(self.selected_shapes_tag):
+            img_specs=self.image_specs[tag]
+            self.image_widget=self.canvas.find_withtag(tag)[0]
+            x1, y1, x2, y2 = self.selected_shapes_init_size[index]
+            if button_tag=="right_btn":
+                width = x2 - x1 - new_width
             else:
-                self.last_stretch_x = x1
-                self.last_stretch_y = y1+ new_height
+                width = x2 - x1 + new_width
 
-                x1_ = (x1 + (width / 2))-5
-                y1_=y1 + new_height
-                y1=y1_
-                offsetx=10
-                offsety=-10
-                
-
-            self.canvas.create_image(x1, y1, image=self.image_specs[tag].tk_image, anchor=tk.NW,tag=tag)
-            self.canvas.create_rectangle(x1_,y1_,x1_+offsetx, y1_+offsety,fill='white',tag="resize", outline='black', width=2)
+            height = y2 - y1 - new_height
             
-    def stretch_image(self,event,tag,original_button):
+
+            if height>1 and width>1:
+                match img_specs.shape_type:
+                    case "star":
+                        self.shape.draw_star()
+                    case "rectangle":
+                        self.shape.draw_rectangle()
+                    case "circle":
+                        self.shape.draw_circle()
+                    case "pentagon":
+                        self.shape.draw_pentagon()
+                    case "arrow":
+                        self.shape.draw_arrow()
+                    case "triangle":
+                        self.shape.draw_triangle()
+
+                self.rotated_image = self.shape.image.rotate(self.image_specs[tag].angle,expand=False).resize((width, height), Image.BILINEAR)
+                self.image_specs[tag].tk_image=ImageTk.PhotoImage(self.rotated_image)
+                self.canvas.itemconfig(self.image_widget, image=self.image_specs[tag].tk_image)
+                if button_tag=="left_btn":
+                    self.canvas.coords(self.image_widget,x1-new_width,y1)
+                if button_tag=="top_btn":
+                    self.canvas.coords(self.image_widget,x1,y1+new_height)
+        
+        x1,y1,x2,y2=self.canvas.coords(button_tag)
+        if button_tag=="right_btn" or  button_tag=="left_btn":
+            self.canvas.coords(button_tag, event.x,y1,event.x+10,y2)
+        else:
+            self.canvas.coords(button_tag, x1,event.y,x2,event.y+10)                        
+            
+    def stretch_image(self,event,tag):
         if self.is_stretching:
             new_height=self.first_stretch_y-event.y
             new_width=self.first_stretch_x-event.x
 
-            match self.canvas.gettags(original_button)[0]:
+            match tag:
                 case "bottom_btn":
                     self.canvas.delete("resize","top_btn","left_btn","right_btn")
-                    self.calculate_stretch(tag,0,-new_height,original_button,"bottom",event)
+                    self.calculate_stretch(event,0,new_height,tag)
                      
                 case "right_btn":
                     self.canvas.delete("resize","top_btn","left_btn","bottom_btn")
-                    self.calculate_stretch(tag,-new_width,0,original_button,"right",event)
+                    self.calculate_stretch(event,new_width,0,tag)
 
                 case "left_btn":
                     self.canvas.delete("resize","top_btn","right_btn","bottom_btn")
-                    self.calculate_stretch(tag,new_width,0,original_button,"left",event)
+                    self.calculate_stretch(event,new_width,0,tag)
 
                 case "top_btn":
                     self.canvas.delete("resize","bottom_btn","left_btn","right_btn")
                     new_height = event.y - self.first_stretch_y
-                    self.calculate_stretch(tag,0,new_height,original_button,"top",event)
-                                                  
-    def stop_stretch(self,event,tag):
-        self.canvas.delete(tag,"resize","top_resize","left_resize","right_resize","bottom_resize")
+                    self.calculate_stretch(event,0,new_height,tag)
+                                                   
+    def stop_stretch(self,event):
+        self.selected_shapes_init_size.clear()
+        self.canvas.delete("resize","top_btn","left_btn","right_btn","bottom_btn")
+        if len(self.selected_shapes_tag)==1:
+            self.selected_shape(event,self.selected_shapes_tag[0])
+        
         self.is_stretching=False
         self.delete_origin=False
-        image_object=self.canvas.create_image(self.last_stretch_x, self.last_stretch_y, image=self.image_specs[tag].tk_image, anchor=tk.NW,tag=tag)
-        self.canvas.tag_bind(image_object, "<ButtonPress-1>",lambda event,tag=tag: self.selected_shape(event,tag))
-        self.canvas.tag_bind(image_object, "<B1-Motion>",lambda event,tag=tag: self.drag_shape(event,tag))
-        self.selected_shape(event,tag)
     
     def check_overlapp(self,item_id):
         overlapping_items = self.canvas.find_overlapping(*self.canvas.bbox(item_id))
@@ -478,12 +501,20 @@ class EditShapes:
             print(len(overlapping_items))
     #select 
     def selected_shape(self,event,tag):
+        self.selected_shapes_tag.clear()
+        self.selected_shapes_init_size.clear()
         image_id=self.canvas.find_withtag(tag)[0]
+        bbox=self.canvas.bbox(image_id)
         self.check_overlapp(image_id)
-        self.selected_shape_tag=tag
+        if tag not in self.selected_shapes_tag:
+            self.selected_shapes_tag.append(tag)
+
+        if bbox not in self.selected_shapes_init_size:
+            self.selected_shapes_init_size.append(bbox)
+
         self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
         # Get the rectangle's coordinates and size
-        x1, y1, x2, y2 = self.canvas.bbox(image_id)
+        x1, y1, x2, y2 = bbox
         width = x2 - x1
         height = y2 - y1
         
@@ -498,28 +529,29 @@ class EditShapes:
 
         self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
         self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-        self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event,tag=tag:self.stretch_image(event,tag,self.bottom_resize))
-        self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event,tag=tag:self.stop_stretch(event,tag))
+        self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
+        self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
         
 
         self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
         self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-        self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event,tag=tag:self.stretch_image(event,tag,self.top_resize))
-        self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event,tag=tag:self.stop_stretch(event,tag))
+        self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
+        self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
 
         y1_ = y1+(height/2)
+        x1_ = x1+width
 
         self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
         self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-        self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event,tag=tag:self.stretch_image(event,tag,self.left_resize))
-        self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event,tag=tag:self.stop_stretch(event,tag))
+        self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
+        self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
         
-        x1_ = x1+width
+        
 
         self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
         self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-        self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event,tag=tag:self.stretch_image(event,tag,self.right_resize))
-        self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event,tag=tag:self.stop_stretch(event,tag))
+        self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
+        self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
 
     def draw_border(self,dx, dy):
         self.canvas.move(self.selected_rect, dx, dy)
@@ -546,89 +578,89 @@ class EditShapes:
         
         self.canvas.after(5, lambda dx=dx, dy=dy:self.draw_border(dx, dy))
 
-    def update_shape(self):
-        if self.selected_shape_tag is not None:
-            image_id=self.canvas.find_withtag(self.selected_shape_tag)[0]
-            x1, y1, x2, y2 = self.canvas.bbox(image_id)
-            width = x2 - x1
-            height = y2 - y1
-            self.img_specs=self.image_specs[self.selected_shape_tag]
-            match self.img_specs.shape_type:
-                case "star":
-                    self.shape.draw_star()
-                case "rectangle":
-                    self.shape.draw_rectangle()
-                case "circle":
-                    self.shape.draw_circle()
-                case "pentagon":
-                    self.shape.draw_pentagon()
-                case "arrow":
-                    self.shape.draw_arrow()
-                case "triangle":
-                    self.shape.draw_triangle()
+    def update_shape(self,tag):
+        image_id=self.canvas.find_withtag(tag)[0]
+        self.img_specs=self.image_specs[tag]
+        x1, y1, x2, y2 = self.canvas.bbox(image_id)
+        width = x2 - x1
+        height = y2 - y1
+        match self.img_specs.shape_type:
+            case "star":
+                self.shape.draw_star()
+            case "rectangle":
+                self.shape.draw_rectangle()
+            case "circle":
+                self.shape.draw_circle()
+            case "pentagon":
+                self.shape.draw_pentagon()
+            case "arrow":
+                self.shape.draw_arrow()
+            case "triangle":
+                self.shape.draw_triangle()
 
 
-            self.img_specs.angle%=360
-            self.shape.angle=self.img_specs.angle
-            self.img_specs.tk_image=ImageTk.PhotoImage(self.shape.image.rotate(self.shape.angle,expand=False).resize((width, height), Image.BILINEAR))
+        self.img_specs.angle%=360
+        self.shape.angle=self.img_specs.angle
+        self.img_specs.tk_image=ImageTk.PhotoImage(self.shape.image.rotate(self.shape.angle,expand=False).resize((width, height), Image.BILINEAR))
 
-            self.canvas.itemconfig(image_id, image=self.img_specs.tk_image)
-            self.shape.angle=0
+        self.canvas.itemconfig(image_id, image=self.img_specs.tk_image)
+        self.shape.angle=0
 
     def change_opacity(self,val):
-        if self.selected_shape_tag is not None:
+        for tag in self.selected_shapes_tag:
             self.shape.alpha=int(float(val)*255)
-            self.shape.change_draw_color(self.image_specs[self.selected_shape_tag].border_color)
-            self.shape.border_width=self.image_specs[self.selected_shape_tag].border_width
-            self.update_shape()
-            self.image_specs[self.selected_shape_tag].opacity=self.shape.alpha
+            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            self.shape.border_width=self.image_specs[tag].border_width
+            self.update_shape(tag)
+            self.image_specs[tag].opacity=self.shape.alpha
 
     def change_border_width(self,val):
-        if self.selected_shape_tag is not None:
+        for tag in self.selected_shapes_tag:
             self.shape.border_width=30-int(val)
-            self.shape.change_draw_color(self.image_specs[self.selected_shape_tag].border_color)
-            self.shape.alpha=self.image_specs[self.selected_shape_tag].opacity
-            self.update_shape()
-            self.image_specs[self.selected_shape_tag].border_width=self.shape.border_width
+            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            self.shape.alpha=self.image_specs[tag].opacity
+            self.update_shape(tag)
+            self.image_specs[tag].border_width=self.shape.border_width
 
     def change_shape_color(self, color):
-        if self.selected_shape_tag is None:
+        if not self.selected_shapes_tag:
             self.shape.change_draw_color([int(color[i:i+2], 16) for i in (1, 3, 5)])
             return
-
-        shape_specs = self.image_specs[self.selected_shape_tag]
-        shape_specs.border_color = [int(color[i:i+2], 16) for i in (1, 3, 5)]
-        self.shape.change_draw_color(shape_specs.border_color)
-        self.shape.border_width = shape_specs.border_width
-        self.shape.alpha = shape_specs.opacity
-        self.update_shape()
+        
+        for tag in self.selected_shapes_tag:
+            shape_specs = self.image_specs[tag]
+            shape_specs.border_color = [int(color[i:i+2], 16) for i in (1, 3, 5)]
+            self.shape.change_draw_color(shape_specs.border_color)
+            self.shape.border_width = shape_specs.border_width
+            self.shape.alpha = shape_specs.opacity
+            self.update_shape(tag)
 
     def rotate_shape(self,angle):
-        if self.selected_shape_tag is not None:
+        for tag in self.selected_shapes_tag:
             # Convert the PhotoImage to a PIL Image
-            self.image_specs[self.selected_shape_tag].angle+=angle
-            self.shape.change_draw_color(self.image_specs[self.selected_shape_tag].border_color)
-            self.shape.alpha=self.image_specs[self.selected_shape_tag].opacity
-            self.shape.border_width=self.image_specs[self.selected_shape_tag].border_width
-            self.update_shape()
+            self.image_specs[tag].angle+=angle
+            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            self.shape.alpha=self.image_specs[tag].opacity
+            self.shape.border_width=self.image_specs[tag].border_width
+            self.update_shape(tag)
 
     def delete_shape(self,event):
-        if self.selected_shape_tag is not None and event.keysym =='Delete':
-            self.canvas.delete(self.selected_shape_tag,"border","bottom_btn","top_btn","left_btn","right_btn") 
-            del self.image_specs[self.selected_shape_tag]
-            self.selected_shape_tag=None
-
-
+        if event.keysym =='Delete':
+            for tag in self.selected_shapes_tag:
+                self.canvas.delete(tag,"border","bottom_btn","top_btn","left_btn","right_btn") 
+                del self.image_specs[tag]
+            self.selected_shapes_tag.clear()
 
 class DrawApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Paint")
-        self.geometry("800x600")
+        self.geometry("1200x600")
         self.attributes('-fullscreen', False)
         self.bind("<Escape>", lambda event: self.destroy())
         self.settings_menu()
 
+        self.file_name=""
         self.selected_color_index=0
         self.color_palete_index=0
         self.previous_shape_border=None
@@ -655,8 +687,6 @@ class DrawApp(tk.Tk):
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
 
-    
-        self.canvas.create_rectangle(100, 100, 300, 300, fill="gray")
         self.edit_shape=EditShapes(self.canvas)
 
         self.selection_img = tk.PhotoImage(file="images/others/rect_dots.png")
@@ -847,13 +877,60 @@ class DrawApp(tk.Tk):
     def donothing(self):
         print("nothing")
 
+    def save_as(self):
+        self.file_name=filedialog.asksaveasfilename(initialdir=os.getcwd(),filetypes=(('PNG File','.PNG'),('JPG File','.JPG')))
+        if self.file_name != "":
+            self.file_name+='.PNG'
+            transperant_image=Image.new("RGBA", (1920, 1080), (0, 0, 0,0))
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+            for item in self.canvas.find_all():
+                obj_coords = self.canvas.coords(item)
+                obj_tags = self.canvas.gettags(item)
+                pil_image=ImageTk.getimage(self.edit_shape.image_specs[obj_tags[0]].tk_image)
+                transperant_image.paste(pil_image,(int(obj_coords[0]),int(obj_coords[1])))
+            
+
+            # Create a new image with a white background
+            background = Image.new("RGBA", transperant_image.size, (255, 255, 255, 255))
+
+            # Paste the transparent image onto the white background
+            background.paste(transperant_image, mask=transperant_image)
+
+            # Save the resulting image
+            background.save(self.file_name)
+
+    def quick_save(self):
+        if self.file_name == "":
+            self.save_canvas_as()
+        else:
+            transperant_image=Image.new("RGBA", (1920, 1080), (0, 0, 0,0))
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+            for item in self.canvas.find_all():
+                obj_coords = self.canvas.coords(item)
+                obj_tags = self.canvas.gettags(item)
+                pil_image=ImageTk.getimage(self.edit_shape.image_specs[obj_tags[0]].tk_image)
+                transperant_image.paste(pil_image,(int(obj_coords[0]),int(obj_coords[1])))
+            
+
+            # Create a new image with a white background
+            background = Image.new("RGBA", transperant_image.size, (255, 255, 255, 255))
+
+            # Paste the transparent image onto the white background
+            background.paste(transperant_image, mask=transperant_image)
+
+            # Save the resulting image
+            background.save(self.file_name)
+
+    def clear_canvas(self):
+        self.canvas.delete("all")
+
     def settings_menu(self):
         menubar = tk.Menu(self)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="New", command=self.donothing)
+        filemenu.add_command(label="New", command=self.clear_canvas)
         filemenu.add_command(label="Open", command=self.donothing)
-        filemenu.add_command(label="Save", command=self.donothing)
-        filemenu.add_command(label="Save as...", command=self.donothing)
+        filemenu.add_command(label="Save", command=self.quick_save)
+        filemenu.add_command(label="Save as...", command=self.save_as)
         filemenu.add_command(label="Close", command=self.donothing)
 
         filemenu.add_separator()
