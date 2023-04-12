@@ -1,9 +1,9 @@
 import tkinter as tk
 from tkinter.colorchooser import askcolor
 from tkinter import filedialog
-from PIL import Image, ImageTk, ImageDraw,ImageGrab
+from PIL import Image, ImageTk, ImageDraw
 import os
-
+import copy
 
 COLORS = [
     (0, 0, 0),
@@ -51,8 +51,9 @@ class Shape:
         self.angle=0
         self.border_width = 23 #max value 30
         self.alpha = 255 #int(1 * 255)
+        self.draw_color_string=""
         self.draw_color=[0,0,0]
-
+        
     def create_arrow(self,size):
         # Define the arrow shape as a list of points relative to the center
         arrow_points = [
@@ -245,21 +246,38 @@ class Shape:
     
     def change_draw_color(self,new_color):
         self.draw_color.clear()
-        for color in new_color:
-            self.draw_color.append(color)
+        self.draw_color=list(new_color)
 
 #shape_type,bd_width,bd_color
 class ImageSpecs:
-    def __init__(self,shape_type,border_color,border_width,opacity,tk_image):
+    def __init__(self,shape_type,color,border_width,opacity,tk_image):
         self.shape_type=shape_type
-        self.border_color=border_color
+        self.color=color
         self.border_width=border_width
         self.opacity=opacity
         self.tk_image=tk_image
         self.angle=0
 
+class CopiedImage:
+    def __init__(self,img_spec,pos_x,pos_y):
+        self.img_spec=img_spec
+        self.pos_x=pos_x
+        self.pos_y=pos_y 
+
+class Action:
+    def __init__(self,action_name,selected_shapes=[],tk_images=[],x_y=[]):
+        self.action_name=action_name
+        self.shapes=copy.copy(selected_shapes)
+        self.tk_images=copy.copy(tk_images)
+        self.x_y=copy.copy(x_y)
+
+    def get_info(self):
+        print(self.action_name,self.shapes,self.shapes_size)
+
 class EditShapes:
     def __init__(self,canvas):
+        #history list
+        self.history =[]
         #draw variables         
         self.first_x,self.first_y= None, None
         self.last_x, self.last_y = None, None
@@ -275,14 +293,22 @@ class EditShapes:
         #stretch variables
         self.first_stretch_x,self.first_stretch_y= None, None
         self.last_stretch_x, self.last_stretch_y = None, None
-        self.delete_origin=False
 
         #selection variables
+        self.drag_selection=False
         self.shape_dragged=False
+        self.selected_x_y=[]
         self.selected_shapes_tag=[]
         self.selected_shapes_init_size=[]
+        self.copied_image_specs=[]
         self.click_shape_x,self.click_shape_y=0,0
-        
+        self.paste_shape_x,self.paste_shape_y=0,0
+        self.selected_border_width,self.selected_border_height=0,0
+
+        #file 
+        self.file_name=""
+        self.tk_background_image=None
+
         #move/drag variables
         self.selected_rect=None
 
@@ -290,14 +316,17 @@ class EditShapes:
         self.image_tk = ImageTk.PhotoImage(self.shape.image)
     #draw
     def start_draw(self,event):
-        if len(self.canvas.find_withtag(tk.CURRENT))==0:
-            self.selected_shapes_tag.clear()
-            self.selected_shapes_init_size.clear()
-            self.shape_dragged=False
-            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+        self.drag_selection=self.is_clicked_inside_selection(event)
+        if not self.drag_selection:
+            if len(self.canvas.find_withtag(tk.CURRENT))==0:
+                self.selected_shapes_tag.clear()
+                self.shape_dragged=False
+                self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
             
+            
+
         if not self.selection_tool:
-            self.first_x, self.first_y = event.x, event.y            
+            self.first_x, self.first_y =int(self.canvas.canvasx(event.x)),int(self.canvas.canvasy(event.y))
             self.shape_dragged=False
             match self.shape_type:
                 case "star":
@@ -313,94 +342,111 @@ class EditShapes:
                 case "triangle":
                     self.shape.draw_triangle()
         else:
-            self.selection_rectangle = (event.x, event.y, event.x, event.y)
+            self.selection_rectangle = (int(self.canvas.canvasx(event.x)), int(self.canvas.canvasy(event.y)), int(self.canvas.canvasx(event.x)), int(self.canvas.canvasy(event.y)))
 
     def stop_draw(self, event):
+        if self.drag_selection and len(self.selected_shapes_tag)>1:
+            self.stop_drag_shape("")
         if self.is_dragging:
+            self.shape_counter+=1
             self.is_dragging = False
             self.canvas.delete("shape")
             tag=f"{self.shape_type}_shape_{self.shape_counter}"
-            colors=[]
-            for x in self.shape.draw_color:
-                colors.append(x)
+            colors=list(self.shape.draw_color)
 
             specs=ImageSpecs(self.shape_type,colors,self.shape.border_width,self.shape.alpha,self.image_tk)
 
             self.image_specs[tag]=specs
             image_object=self.canvas.create_image(self.last_x, self.last_y, image=self.image_specs[tag].tk_image, anchor=tk.NW,tag=tag)
             self.canvas.tag_bind(image_object, "<ButtonPress-1>",lambda event,tag=tag: self.selected_shape(event,tag))
-            self.canvas.tag_bind(image_object, "<B1-Motion>",lambda event,tag=tag: self.drag_shape(event,tag))
+            self.canvas.tag_bind(image_object, "<B1-Motion>",self.drag_shape)
+            self.canvas.tag_bind(image_object, "<ButtonRelease-1>",self.stop_drag_shape)
             self.selected_shape(event,tag)
             self.shape_dragged=False
-            self.shape_counter+=1
+            create_action=Action("create",self.selected_shapes_tag)
+            self.history.append(create_action)
+            
         #delete selection rectangle
         if self.selection_tool and not self.is_stretching:
+            self.selected_x_y.clear()
             x0, y0, x1, y1 = self.selection_rectangle
             item_id=self.canvas.create_rectangle(x0, y0, x1, y1,tags="sel_rect")
             overlapping_items = self.canvas.find_overlapping(*self.canvas.bbox(item_id))
-            overlapping_items = [tag for tag in overlapping_items if tag != item_id and self.canvas.type(tag) == "image"]
-            for item in overlapping_items:
-                tag = self.canvas.gettags(item)[0]
-                if tag not in self.selected_shapes_tag:
-                    self.selected_shapes_tag.append(tag)
-                if self.canvas.bbox(item) not in self.selected_shapes_init_size:
-                    self.selected_shapes_init_size.append(self.canvas.bbox(item))
-            if len(overlapping_items) > 1:
-                bbox_coords = [self.canvas.bbox(item) for item in overlapping_items]
-                x1, y1 = min(coord[0] for coord in bbox_coords), min(coord[1] for coord in bbox_coords)
-                x2, y2 = max(coord[2] for coord in bbox_coords), max(coord[3] for coord in bbox_coords)
-                width = x2 - x1
-                height = y2 - y1
+            overlapping_items = [tag for tag in overlapping_items if tag != item_id and self.canvas.type(tag) == "image" and self.canvas.gettags(tag)[0]!="background_image"]
+            if len(overlapping_items)>0:
+                for item in overlapping_items:
+                    tag = self.canvas.gettags(item)[0]
+                    self.selected_x_y.append(self.canvas.coords(tag))
+                    if tag not in self.selected_shapes_tag:
+                        self.selected_shapes_tag.append(tag)
+                    if self.canvas.bbox(item) not in self.selected_shapes_init_size:
+                        self.selected_shapes_init_size.append(self.canvas.bbox(item))
+
+                if  not self.drag_selection:
+                    bbox_coords = [self.canvas.bbox(item) for item in overlapping_items]
+                    x1, y1 = min(coord[0] for coord in bbox_coords), min(coord[1] for coord in bbox_coords)
+                    x2, y2 = max(coord[2] for coord in bbox_coords), max(coord[3] for coord in bbox_coords)
+                    width = x2 - x1
+                    height = y2 - y1
+                    #self.selected_border_width,self.selected_border_height=width/2,height/2
+                    
+                    self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
+
+                    stretch_btn_offset=10
+                    x1_ = x1+(width/2)
+                    y1_ = y1+height
+
+                    self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
+                    self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                    self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
+                    self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+                    
+
+                    self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
+                    self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                    self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
+                    self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+                    y1_ = y1+(height/2)
+                    x1_ = x1+width
+
+                    self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
+                    self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                    self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
+                    self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+                    
+                    
+
+                    self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
+                    self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+                    self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
+                    self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+
                 
-                self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
+                else:
+                    self.selected_shapes_init_size.clear()
+                    for tag in self.selected_shapes_tag:
+                        item_id = self.canvas.find_withtag(tag)[0]
+                        self.selected_shapes_init_size.append(self.canvas.bbox(item_id))
 
-                stretch_btn_offset=10
-                x1_ = x1+(width/2)
-                y1_ = y1+height
-
-                self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
-                self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-                self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
-                self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
-                
-
-                self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
-                self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-                self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
-                self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
-
-                y1_ = y1+(height/2)
-                x1_ = x1+width
-
-                self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
-                self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-                self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
-                self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
-                
-                
-
-                self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
-                self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
-                self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
-                self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
-
-            elif len(overlapping_items) == 1 and len(self.selected_shapes_tag)==1:
-                self.selected_shape(event, self.selected_shapes_tag[0])
-
-            self.canvas.delete("sel_rect")
+        self.canvas.delete("sel_rect")
 
     def drag_draw(self, event):
         #draw selection rectangle
+        if self.drag_selection and len(self.selected_shapes_tag)>1:
+            self.drag_shape(event)
+
         if not self.shape_dragged and not self.is_stretching:
             if self.selection_tool:
                 self.canvas.delete("sel_rect")
-                self.selection_rectangle = (self.selection_rectangle[0], self.selection_rectangle[1], event.x, event.y)
+                self.selection_rectangle = (self.selection_rectangle[0], self.selection_rectangle[1], int(self.canvas.canvasx(event.x)), int(self.canvas.canvasy(event.y)))
                 x0, y0, x1, y1 = self.selection_rectangle
                 self.canvas.create_rectangle(x0, y0, x1, y1, outline="red", tags="sel_rect", width=2,dash=(10,10))
 
             else:
                 self.is_dragging=True
-                x, y = event.x - self.first_x, event.y - self.first_y
+                x, y = int(self.canvas.canvasx(event.x)) - self.first_x, int(self.canvas.canvasy(event.y)) - self.first_y
                 resized_image, invert_x, invert_y = self.shape.get_resized_image(x, y)
                 self.last_x=self.first_x + invert_x
                 self.last_y=self.first_y + invert_y
@@ -413,11 +459,25 @@ class EditShapes:
     def enable_stretch(self,event):
         if not self.is_dragging:
             self.canvas.delete("border")
-            self.first_stretch_x=event.x
-            self.first_stretch_y=event.y
+            self.first_stretch_x=int(self.canvas.canvasx(event.x))
+            self.first_stretch_y=int(self.canvas.canvasy(event.y))
             self.is_stretching=True
 
+            images=[]
+            x_y=[]
+            for tag in self.selected_shapes_tag:
+                image_widget=self.canvas.find_withtag(tag)[0]
+                img_specs=self.image_specs[tag]
+                images.append(img_specs.tk_image)
+                x_y.append(self.canvas.coords(image_widget))
+
+
+            stretch_action=Action("stretch",self.selected_shapes_tag,images,x_y=x_y)
+            self.history.append(stretch_action)
+
     def calculate_stretch(self,event,new_width,new_height,button_tag):
+        prev_color=list(self.shape.draw_color)
+        prev_opcity=self.shape.alpha
         for index, tag in enumerate(self.selected_shapes_tag):
             img_specs=self.image_specs[tag]
             self.image_widget=self.canvas.find_withtag(tag)[0]
@@ -431,6 +491,10 @@ class EditShapes:
             
 
             if height>1 and width>1:
+                self.shape.draw_color.clear()
+                self.shape.draw_color=list(self.image_specs[tag].color)
+                self.shape.alpha=self.image_specs[tag].opacity
+
                 match img_specs.shape_type:
                     case "star":
                         self.shape.draw_star()
@@ -444,7 +508,7 @@ class EditShapes:
                         self.shape.draw_arrow()
                     case "triangle":
                         self.shape.draw_triangle()
-
+                
                 self.rotated_image = self.shape.image.rotate(self.image_specs[tag].angle,expand=False).resize((width, height), Image.BILINEAR)
                 self.image_specs[tag].tk_image=ImageTk.PhotoImage(self.rotated_image)
                 self.canvas.itemconfig(self.image_widget, image=self.image_specs[tag].tk_image)
@@ -453,16 +517,18 @@ class EditShapes:
                 if button_tag=="top_btn":
                     self.canvas.coords(self.image_widget,x1,y1+new_height)
         
+        self.shape.draw_color=list(prev_color)
+        self.shape.alpha=prev_opcity
         x1,y1,x2,y2=self.canvas.coords(button_tag)
         if button_tag=="right_btn" or  button_tag=="left_btn":
-            self.canvas.coords(button_tag, event.x,y1,event.x+10,y2)
+            self.canvas.coords(button_tag, int(self.canvas.canvasx(event.x)),y1,int(self.canvas.canvasx(event.x))+10,y2)
         else:
-            self.canvas.coords(button_tag, x1,event.y,x2,event.y+10)                        
-            
+            self.canvas.coords(button_tag, x1,int(self.canvas.canvasy(event.y)),x2,int(self.canvas.canvasy(event.y))+10)                        
+
     def stretch_image(self,event,tag):
         if self.is_stretching:
-            new_height=self.first_stretch_y-event.y
-            new_width=self.first_stretch_x-event.x
+            new_height=self.first_stretch_y-int(self.canvas.canvasy(event.y))
+            new_width=self.first_stretch_x-int(self.canvas.canvasx(event.x))
 
             match tag:
                 case "bottom_btn":
@@ -479,33 +545,74 @@ class EditShapes:
 
                 case "top_btn":
                     self.canvas.delete("resize","bottom_btn","left_btn","right_btn")
-                    new_height = event.y - self.first_stretch_y
+                    new_height = int(self.canvas.canvasy(event.y)) - self.first_stretch_y
                     self.calculate_stretch(event,0,new_height,tag)
                                                    
     def stop_stretch(self,event):
         self.selected_shapes_init_size.clear()
+        for tag in self.selected_shapes_tag:
+            item_id = self.canvas.find_withtag(tag)[0]
+            self.selected_shapes_init_size.append(self.canvas.bbox(item_id))
+
         self.canvas.delete("resize","top_btn","left_btn","right_btn","bottom_btn")
         if len(self.selected_shapes_tag)==1:
             self.selected_shape(event,self.selected_shapes_tag[0])
+        else:
+            bbox_coords = [self.canvas.bbox(item) for item in self.selected_shapes_tag]
+            x1, y1 = min(coord[0] for coord in bbox_coords), min(coord[1] for coord in bbox_coords)
+            x2, y2 = max(coord[2] for coord in bbox_coords), max(coord[3] for coord in bbox_coords)
+            width = x2 - x1
+            height = y2 - y1
+            
+            self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
+
+            stretch_btn_offset=10
+            x1_ = x1+(width/2)
+            y1_ = y1+height
+
+            self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
+            self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+            
+
+            self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
+            self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+            y1_ = y1+(height/2)
+            x1_ = x1+width
+
+            self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
+            self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+            
+            
+
+            self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
+            self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
         
         self.is_stretching=False
-        self.delete_origin=False
     
-    def check_overlapp(self,item_id):
-        overlapping_items = self.canvas.find_overlapping(*self.canvas.bbox(item_id))
-        overlapping_items = [tag for tag in overlapping_items if tag != item_id and self.canvas.type(tag) == "image"]
-
-        if overlapping_items:
-            # There is an image behind the current image
-            # do something here
-            print(len(overlapping_items))
     #select 
+    def deselect_shape(self,event):
+        if not self.is_clicked_inside_selection(event):
+            self.selected_shapes_tag.clear()
+            self.shape_dragged=False
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+
     def selected_shape(self,event,tag):
+        self.selected_x_y.clear()
         self.selected_shapes_tag.clear()
         self.selected_shapes_init_size.clear()
         image_id=self.canvas.find_withtag(tag)[0]
+        self.selected_x_y.append(self.canvas.coords(image_id))
         bbox=self.canvas.bbox(image_id)
-        self.check_overlapp(image_id)
         if tag not in self.selected_shapes_tag:
             self.selected_shapes_tag.append(tag)
 
@@ -518,8 +625,9 @@ class EditShapes:
         width = x2 - x1
         height = y2 - y1
         
-        self.click_shape_x=event.x
-        self.click_shape_y=event.y
+        #self.selected_border_width,self.selected_border_height=width/2,height/2
+        self.click_shape_x=int(self.canvas.canvasx(event.x))
+        self.click_shape_y=int(self.canvas.canvasy(event.y))
         
         self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
 
@@ -559,24 +667,96 @@ class EditShapes:
     def enable_selection_tool(self):
         self.selection_tool=True
 
+    def get_hover_mouse_pos(self,event):
+        self.paste_shape_x,self.paste_shape_y=int(self.canvas.canvasx(event.x)),int(self.canvas.canvasy(event.y))
+        #print(self.paste_shape_x)
+        
+    def copy_shapes(self,_):
+        self.copied_image_specs.clear()
+        item_id = self.canvas.find_withtag("border")[0]
+        x1,y1,x2,y2=self.canvas.coords(item_id)
+        width = x2 - x1
+        height = y2 - y1
+
+        self.selected_border_width,self.selected_border_height= width/2,height/2
+        
+
+        smallest_x=0
+        smallest_index=0
+        for index,tag in enumerate(self.selected_shapes_tag):
+            item_id = self.canvas.find_withtag(tag)[0]
+            x,y=self.canvas.coords(item_id)
+            if smallest_x==0 or smallest_x>x:
+                smallest_x=x
+                smallest_index=index
+
+
+        first_item_id = self.canvas.find_withtag(self.selected_shapes_tag[smallest_index])[0]
+        first_x,first_y=self.canvas.coords(first_item_id)
+
+        for tag in self.selected_shapes_tag:
+            item_id = self.canvas.find_withtag(tag)[0]
+            x,y=self.canvas.coords(item_id)
+            image_specs=self.image_specs[tag]
+            copied_img=CopiedImage(image_specs,x-first_x,y-first_y)
+
+            self.copied_image_specs.append(copied_img)
+
+    def paste_shapes(self,_):
+        pasted_shapes_tags=[]
+        for img_copy in self.copied_image_specs:
+            self.shape_counter+=1
+            tag=f"{img_copy.img_spec.shape_type}_shape_{self.shape_counter}"
+            pasted_shapes_tags.append(tag)
+            
+            copied_img_specs=copy.copy(img_copy.img_spec)
+            self.image_specs[tag]=copied_img_specs
+            
+            image_object=self.canvas.create_image(self.paste_shape_x+img_copy.pos_x-self.selected_border_width,self.paste_shape_y+img_copy.pos_y-self.selected_border_height, 
+                                                  image=self.image_specs[tag].tk_image, anchor=tk.NW,tag=tag)
+            self.canvas.tag_bind(image_object, "<ButtonPress-1>",lambda event,tag=tag: self.selected_shape(event,tag))
+            self.canvas.tag_bind(image_object, "<B1-Motion>",self.drag_shape)
+            self.canvas.tag_bind(image_object, "<ButtonRelease-1>",self.stop_drag_shape)
+
+        create_action=Action("create",pasted_shapes_tags)
+        self.history.append(create_action)
+
+    def is_clicked_inside_selection(self,event):
+         # get the item that was clicked
+        rect_items = self.canvas.find_withtag("border") # get all the rectangles with the "border" tag
+        for rect in rect_items:
+            rect_coords = self.canvas.coords(rect) # get the coordinates of the clicked rectangle
+            x1, y1, x2, y2 = rect_coords
+            if x1 < int(self.canvas.canvasx(event.x)) < x2 and y1 < int(self.canvas.canvasy(event.y)) < y2:
+                self.click_shape_y=int(self.canvas.canvasy(event.y))
+                self.click_shape_x=int(self.canvas.canvasx(event.x))
+                return True
+        return False
+
     #move/drag
-    def drag_shape(self,event,tag):
+    def drag_shape(self,event):
         self.shape_dragged=True
-        item_id = self.canvas.find_withtag(tag)[0]
-        # Set the new coordinates based on the mouse position
+        dx=int(self.canvas.canvasx(event.x))-self.click_shape_x
+        dy=int(self.canvas.canvasy(event.y))-self.click_shape_y
+        self.selected_shapes_init_size.clear()
+        for tag in self.selected_shapes_tag:
+            item_id = self.canvas.find_withtag(tag)[0]
+            self.canvas.move(item_id,dx, dy)
+            self.selected_shapes_init_size.append(self.canvas.bbox(item_id))
 
-        dx=event.x-self.click_shape_x
-        dy=event.y-self.click_shape_y
-
-        self.canvas.move(item_id,dx, dy)
         self.canvas.move(self.bottom_resize,dx, dy)
         self.canvas.move(self.top_resize,dx, dy)
         self.canvas.move(self.left_resize,dx, dy)
         self.canvas.move(self.right_resize,dx, dy)
-        self.click_shape_x=event.x
-        self.click_shape_y=event.y 
-        
         self.canvas.after(5, lambda dx=dx, dy=dy:self.draw_border(dx, dy))
+
+        self.click_shape_x=int(self.canvas.canvasx(event.x))
+        self.click_shape_y=int(self.canvas.canvasy(event.y)) 
+            
+    def stop_drag_shape(self,_):
+        drag_action=Action("drag",self.selected_shapes_tag,x_y=self.selected_x_y)
+        self.selected_x_y.clear()
+        self.history.append(drag_action)
 
     def update_shape(self,tag):
         image_id=self.canvas.find_withtag(tag)[0]
@@ -607,60 +787,262 @@ class EditShapes:
         self.shape.angle=0
 
     def change_opacity(self,val):
+        images=[]
         for tag in self.selected_shapes_tag:
             self.shape.alpha=int(float(val)*255)
-            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            self.shape.change_draw_color(self.image_specs[tag].color)
             self.shape.border_width=self.image_specs[tag].border_width
+            images.append(self.image_specs[tag].tk_image)
             self.update_shape(tag)
             self.image_specs[tag].opacity=self.shape.alpha
 
+        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
+        self.history.append(create_action)
+        
     def change_border_width(self,val):
+        images=[]
         for tag in self.selected_shapes_tag:
             self.shape.border_width=30-int(val)
-            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            self.shape.change_draw_color(self.image_specs[tag].color)
             self.shape.alpha=self.image_specs[tag].opacity
+            images.append(self.image_specs[tag].tk_image)
             self.update_shape(tag)
             self.image_specs[tag].border_width=self.shape.border_width
+        
+        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
+        self.history.append(create_action)
 
     def change_shape_color(self, color):
         if not self.selected_shapes_tag:
             self.shape.change_draw_color([int(color[i:i+2], 16) for i in (1, 3, 5)])
             return
         
+        images=[]
         for tag in self.selected_shapes_tag:
             shape_specs = self.image_specs[tag]
-            shape_specs.border_color = [int(color[i:i+2], 16) for i in (1, 3, 5)]
-            self.shape.change_draw_color(shape_specs.border_color)
+            shape_specs.color = [int(color[i:i+2], 16) for i in (1, 3, 5)]
+            images.append(self.image_specs[tag].tk_image)
+            self.shape.change_draw_color(shape_specs.color)
             self.shape.border_width = shape_specs.border_width
             self.shape.alpha = shape_specs.opacity
             self.update_shape(tag)
 
+        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
+        self.history.append(create_action)
+
     def rotate_shape(self,angle):
+        images=[]
         for tag in self.selected_shapes_tag:
             # Convert the PhotoImage to a PIL Image
             self.image_specs[tag].angle+=angle
-            self.shape.change_draw_color(self.image_specs[tag].border_color)
+            images.append(self.image_specs[tag].tk_image)
+            self.shape.change_draw_color(self.image_specs[tag].color)
             self.shape.alpha=self.image_specs[tag].opacity
             self.shape.border_width=self.image_specs[tag].border_width
             self.update_shape(tag)
 
-    def delete_shape(self,event):
+        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
+        self.history.append(create_action)
+
+    #select actions
+    def select_all_shapes(self):
+        self.selected_x_y.clear()
+        self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+        selected_shapes=[]
+        for item in self.canvas.find_all():
+            item = self.canvas.gettags(item)
+            if "shape" in item[0]:
+                #remove current
+                if len(item)>1:
+                    item=(item[0],)
+                selected_shapes.append(item)
+
+        
+        for item in selected_shapes:
+            if len(self.canvas.gettags(item))>0:
+                tag = self.canvas.gettags(item)[0]
+                self.selected_x_y.append(self.canvas.coords(tag))
+                if tag not in self.selected_shapes_tag:
+                    self.selected_shapes_tag.append(tag)
+                if self.canvas.bbox(item) not in self.selected_shapes_init_size:
+                    self.selected_shapes_init_size.append(self.canvas.bbox(item))
+        
+        if len(selected_shapes)>0:
+            bbox_coords = [self.canvas.bbox(item) for item in selected_shapes]
+            x1, y1 = min(coord[0] for coord in bbox_coords), min(coord[1] for coord in bbox_coords)
+            x2, y2 = max(coord[2] for coord in bbox_coords), max(coord[3] for coord in bbox_coords)
+            width = x2 - x1
+            height = y2 - y1
+            
+            #self.selected_border_width,self.selected_border_height= (x1 + x2) / 2,(y1 + y2) / 2
+
+            self.selected_rect=self.canvas.create_rectangle(x1, y1, x1+width, y1+height, outline='red', width=2,tag="border",dash=(10,10))
+
+            stretch_btn_offset=10
+            x1_ = x1+(width/2)
+            y1_ = y1+height
+
+            self.bottom_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="bottom_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.bottom_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.bottom_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"bottom_btn"))
+            self.canvas.tag_bind(self.bottom_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+            
+
+            self.top_resize=self.canvas.create_rectangle(x1_-5,y1, x1_+5, y1-stretch_btn_offset,fill='white',tag="top_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.top_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.top_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"top_btn"))
+            self.canvas.tag_bind(self.top_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+            y1_ = y1+(height/2)
+            x1_ = x1+width
+
+            self.left_resize=self.canvas.create_rectangle(x1,y1_, x1-stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="left_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.left_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.left_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"left_btn"))
+            self.canvas.tag_bind(self.left_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+            
+            
+
+            self.right_resize=self.canvas.create_rectangle(x1_,y1_, x1_+stretch_btn_offset, y1_+stretch_btn_offset,fill='white',tag="right_btn", outline='black', width=2)
+            self.canvas.tag_bind(self.right_resize, "<ButtonPress-1>",lambda  event:self.enable_stretch(event))
+            self.canvas.tag_bind(self.right_resize, "<B1-Motion>",lambda event:self.stretch_image(event,"right_btn"))
+            self.canvas.tag_bind(self.right_resize, "<ButtonRelease-1>",lambda event:self.stop_stretch(event))
+
+    def delete_shapes(self):
+        for tag in self.selected_shapes_tag:
+            self.canvas.delete(tag,"border","bottom_btn","top_btn","left_btn","right_btn") 
+            del self.image_specs[tag]
+        self.selected_shapes_tag.clear()
+        
+    def cut_shape(self):
+        self.copy_shapes("")
+        self.delete_shapes()
+
+    def undo(self):
+        if self.history:
+            prev_action=self.history[len(self.history)-1]
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+            match prev_action.action_name:
+                case "create":
+                    for tag in prev_action.shapes:                    
+                        self.canvas.delete(tag)
+                case "stretch":
+                    for index,tag in enumerate(prev_action.shapes):
+                        self.image_widget=self.canvas.find_withtag(tag)[0]                                     
+                        self.image_specs[tag].tk_image=prev_action.tk_images[index]
+                        self.canvas.coords(self.image_widget, prev_action.x_y[index][0], prev_action.x_y[index][1])
+                        self.canvas.itemconfig(self.image_widget, image=self.image_specs[tag].tk_image)
+                case "change":
+                    for index,tag in enumerate(prev_action.shapes):
+                        self.image_widget=self.canvas.find_withtag(tag)[0]                                     
+                        self.image_specs[tag].tk_image=prev_action.tk_images[index]
+                        self.canvas.itemconfig(self.image_widget, image=self.image_specs[tag].tk_image)
+
+                case "drag":
+                    for index,tag in enumerate(prev_action.shapes):
+                        self.image_widget=self.canvas.find_withtag(tag)[0]                                     
+                        self.canvas.coords(self.image_widget, prev_action.x_y[index][0], prev_action.x_y[index][1])                    
+
+           #print(prev_action.action_name)
+            self.history.pop()
+            
+
+    def short_cuts(self,event):
         if event.keysym =='Delete':
-            for tag in self.selected_shapes_tag:
-                self.canvas.delete(tag,"border","bottom_btn","top_btn","left_btn","right_btn") 
-                del self.image_specs[tag]
-            self.selected_shapes_tag.clear()
+            self.delete_shapes()
+
+        if event.state==4 or event.state==12:
+            if event.keysym == 's' :  # Check for Control+S
+                self.quick_save()
+
+            if event.keysym == 'a':
+                self.select_all_shapes()
+
+            if event.keysym == 'x':
+                self.cut_shape()
+
+            if event.keysym == 'c':
+                self.copy_shapes(event)
+
+            if event.keysym == 'v' :
+                self.paste_shapes(event)
+
+            if event.keysym == 'z' :
+                self.undo()
+
+    def save_as(self):
+        self.file_name=filedialog.asksaveasfilename(initialdir=os.getcwd(),filetypes=(('png File','.png'),('jpg File','.jpg')))
+        if self.file_name != "":
+            self.file_name+='.png'
+
+            background=None
+            if self.tk_background_image==None:
+                # Create a new image with a white background
+                background = Image.new("RGBA",(1920, 1080), (255, 255, 255, 255))
+            else:
+                background=ImageTk.getimage(self.tk_background_image)
+
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+            for item in self.canvas.find_all():
+                obj_tags = self.canvas.gettags(item)
+                if "shape" in obj_tags[0]:
+                    obj_coords = self.canvas.coords(item)
+                    pil_image=ImageTk.getimage(self.image_specs[obj_tags[0]].tk_image)
+                    background.paste(pil_image.convert("RGB"),(int(obj_coords[0]),int(obj_coords[1])), mask=pil_image.getchannel("A"))
+                
+
+
+            # Save the resulting image
+            background.save(self.file_name)
+
+    def quick_save(self):
+        if self.file_name == "":
+            self.save_as()
+        else:
+            background=None
+            if self.tk_background_image==None:
+                # Create a new image with a white background
+                background = Image.new("RGBA",(1920, 1080), (255, 255, 255, 255))
+            else:
+                background=ImageTk.getimage(self.tk_background_image)
+
+            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
+            for item in self.canvas.find_all():
+                obj_tags = self.canvas.gettags(item)
+                if "shape" in obj_tags[0]:
+                    obj_coords = self.canvas.coords(item)
+                    pil_image=ImageTk.getimage(self.image_specs[obj_tags[0]].tk_image)
+                    background.paste(pil_image.convert("RGB"),(int(obj_coords[0]),int(obj_coords[1])), mask=pil_image.getchannel("A"))
+                
+
+
+            # Save the resulting image
+            background.save(self.file_name)
+
+    def clear_canvas(self):
+        self.canvas.delete("all")
+        self.tk_background_image=None
+        self.selected_shapes_tag.clear()
+
+    def open_image(self):
+        self.clear_canvas()
+        file_name_to_open=filedialog.askopenfile(initialdir=os.getcwd(),filetypes=(('PNG File','.PNG'),('JPG File','.JPG')))
+        self.canvas_background_image=Image.open(file_name_to_open.name).resize((1920,1080),Image.BILINEAR)
+        self.tk_background_image=ImageTk.PhotoImage(self.canvas_background_image)
+        bg_object=self.canvas.create_image(0, 0, image=self.tk_background_image, anchor="nw",tag="background_image")
+        self.canvas.tag_bind(bg_object, "<ButtonPress-1>",self.deselect_shape)
 
 class DrawApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Paint")
+        self.title("Figures art")
+        self.iconbitmap("images/others/main.ico")
         self.geometry("1200x600")
         self.attributes('-fullscreen', False)
         self.bind("<Escape>", lambda event: self.destroy())
-        self.settings_menu()
+        
 
-        self.file_name=""
+        
         self.selected_color_index=0
         self.color_palete_index=0
         self.previous_shape_border=None
@@ -681,17 +1063,39 @@ class DrawApp(tk.Tk):
         self.rotate_panel = tk.Frame(self.tools_panel, bd=1, relief=tk.SUNKEN,  highlightthickness = 1,highlightbackground="black")
         self.rotate_panel.pack(side=tk.TOP, fill=tk.Y, pady=5)
 
-                
+
+        self.canvas_frame=tk.Frame(self)
+        self.canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)        
         # Create the canvas on the right
-        self.canvas = tk.Canvas(self, bg='white', width=600)
-        self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(self.canvas_frame, bg='white', width=600,scrollregion=(0,0,1920,1080))
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        x_scroll = tk.Scrollbar(self.canvas_frame, orient='horizontal', command=self.canvas.xview)
+        x_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+
+        y_scroll = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
+        y_scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.canvas.config(xscrollcommand=x_scroll.set, yscrollcommand=y_scroll.set)
+        
         
 
         self.edit_shape=EditShapes(self.canvas)
 
+
+        #selection part 
+        self.selection_frame=tk.Frame(self.tools_panel)
+        self.selection_frame.pack(side=tk.TOP, fill=tk.X, pady=1) 
+
         self.selection_img = tk.PhotoImage(file="images/others/rect_dots.png")
-        self.selection_button = tk.Button(self.tools_panel,image=self.selection_img, compound="top", text='Select',command=self.edit_shape.enable_selection_tool)
-        self.selection_button.pack(side=tk.TOP, fill=tk.Y, pady=1)
+        self.selection_button = tk.Button(self.selection_frame,image=self.selection_img, compound="top", text='Select',command=self.edit_shape.enable_selection_tool)
+        self.selection_button.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+
+        
+        self.delete_img = tk.PhotoImage(file="images/others/delete.png")
+        self.deletion_button = tk.Button(self.selection_frame,image=self.delete_img, compound="top", text='Delete',command=self.edit_shape.delete_shapes)
+        self.deletion_button.pack(side=tk.LEFT, fill=tk.Y, padx=5)
 
         row = 0
         column = 0
@@ -727,13 +1131,17 @@ class DrawApp(tk.Tk):
         self.button3.grid(row=0, column=2, sticky="ew", padx=10, pady=10)
 
         self.canvas.bind("<B1-Motion>", self.edit_shape.drag_draw)
+        self.canvas.bind('<Motion>', self.edit_shape.get_hover_mouse_pos)
         self.canvas.bind("<ButtonPress-1>", self.edit_shape.start_draw)
         self.canvas.bind("<ButtonRelease-1>", self.edit_shape.stop_draw)
-        self.bind("<KeyPress>", self.edit_shape.delete_shape)
+        self.bind("<KeyPress>", self.edit_shape.short_cuts)
         
         # Set the ratio of the panel to the canvas to 1:3
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=3)
+
+        #option menu
+        self.settings_menu()
     
     def pick_color(self):
         color = askcolor()
@@ -810,13 +1218,14 @@ class DrawApp(tk.Tk):
             buttonborder.grid(row=row, column=column, padx=5, pady=5)
 
         #opacity slider
-        opacity_slider = tk.Scale(sliders_frame, from_=1, to=0, resolution=0.1, orient='horizontal',command=self.edit_shape.change_opacity)
-        opacity_slider.set(1)
+        start_var = tk.DoubleVar(value=1)
+        opacity_slider = tk.Scale(sliders_frame, from_=1, to=0, resolution=0.1,variable=start_var, orient='horizontal',command=self.edit_shape.change_opacity)
         opacity_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
         
-        border_slider = tk.Scale(sliders_frame, from_=30, to=0, orient='horizontal',command=self.edit_shape.change_border_width)
+        start_var = tk.DoubleVar(value=9)
+        border_slider = tk.Scale(sliders_frame, from_=30, to=0, orient='horizontal',variable=start_var,command=self.edit_shape.change_border_width)
         border_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
-        border_slider.set(23)
+
 
         custom_font = ("Helvetica", 9,"bold")
         
@@ -877,60 +1286,13 @@ class DrawApp(tk.Tk):
     def donothing(self):
         print("nothing")
 
-    def save_as(self):
-        self.file_name=filedialog.asksaveasfilename(initialdir=os.getcwd(),filetypes=(('PNG File','.PNG'),('JPG File','.JPG')))
-        if self.file_name != "":
-            self.file_name+='.PNG'
-            transperant_image=Image.new("RGBA", (1920, 1080), (0, 0, 0,0))
-            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
-            for item in self.canvas.find_all():
-                obj_coords = self.canvas.coords(item)
-                obj_tags = self.canvas.gettags(item)
-                pil_image=ImageTk.getimage(self.edit_shape.image_specs[obj_tags[0]].tk_image)
-                transperant_image.paste(pil_image,(int(obj_coords[0]),int(obj_coords[1])))
-            
-
-            # Create a new image with a white background
-            background = Image.new("RGBA", transperant_image.size, (255, 255, 255, 255))
-
-            # Paste the transparent image onto the white background
-            background.paste(transperant_image, mask=transperant_image)
-
-            # Save the resulting image
-            background.save(self.file_name)
-
-    def quick_save(self):
-        if self.file_name == "":
-            self.save_canvas_as()
-        else:
-            transperant_image=Image.new("RGBA", (1920, 1080), (0, 0, 0,0))
-            self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")
-            for item in self.canvas.find_all():
-                obj_coords = self.canvas.coords(item)
-                obj_tags = self.canvas.gettags(item)
-                pil_image=ImageTk.getimage(self.edit_shape.image_specs[obj_tags[0]].tk_image)
-                transperant_image.paste(pil_image,(int(obj_coords[0]),int(obj_coords[1])))
-            
-
-            # Create a new image with a white background
-            background = Image.new("RGBA", transperant_image.size, (255, 255, 255, 255))
-
-            # Paste the transparent image onto the white background
-            background.paste(transperant_image, mask=transperant_image)
-
-            # Save the resulting image
-            background.save(self.file_name)
-
-    def clear_canvas(self):
-        self.canvas.delete("all")
-
     def settings_menu(self):
         menubar = tk.Menu(self)
         filemenu = tk.Menu(menubar, tearoff=0)
-        filemenu.add_command(label="New", command=self.clear_canvas)
-        filemenu.add_command(label="Open", command=self.donothing)
-        filemenu.add_command(label="Save", command=self.quick_save)
-        filemenu.add_command(label="Save as...", command=self.save_as)
+        filemenu.add_command(label="New", command=self.edit_shape.clear_canvas)
+        filemenu.add_command(label="Open", command=self.edit_shape.open_image)
+        filemenu.add_command(label="Save", command=self.edit_shape.quick_save)
+        filemenu.add_command(label="Save as...", command=self.edit_shape.save_as)
         filemenu.add_command(label="Close", command=self.donothing)
 
         filemenu.add_separator()
@@ -938,15 +1300,14 @@ class DrawApp(tk.Tk):
         filemenu.add_command(label="Exit", command=self.quit)
         menubar.add_cascade(label="File", menu=filemenu)
         editmenu =  tk.Menu(menubar, tearoff=0)
-        editmenu.add_command(label="Undo", command=self.donothing)
+        editmenu.add_command(label="Undo", command=self.edit_shape.undo)
 
         editmenu.add_separator()
 
-        editmenu.add_command(label="Cut", command=self.donothing)
-        editmenu.add_command(label="Copy", command=self.donothing)
-        editmenu.add_command(label="Paste", command=self.donothing)
-        editmenu.add_command(label="Delete", command=self.donothing)
-        editmenu.add_command(label="Select All", command=self.donothing)
+        editmenu.add_command(label="Cut", command=self.edit_shape.cut_shape)
+        editmenu.add_command(label="Copy", command=lambda:self.edit_shape.copy_shapes(""))
+        editmenu.add_command(label="Delete", command=self.edit_shape.delete_shapes)
+        editmenu.add_command(label="Select All", command=self.edit_shape.select_all_shapes)
 
         menubar.add_cascade(label="Edit", menu=editmenu)
         helpmenu =  tk.Menu(menubar, tearoff=0)
@@ -955,6 +1316,7 @@ class DrawApp(tk.Tk):
         menubar.add_cascade(label="Help", menu=helpmenu)
 
         self.config(menu=menubar)
+
 
 if __name__ == "__main__":
     app = DrawApp()
