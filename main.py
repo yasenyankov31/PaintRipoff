@@ -274,6 +274,7 @@ class Action:
     def get_info(self):
         print(self.action_name,self.shapes,self.shapes_size)
 
+
 class EditShapes:
     def __init__(self,canvas):
         #history list
@@ -787,31 +788,21 @@ class EditShapes:
         self.shape.angle=0
 
     def change_opacity(self,val):
-        images=[]
         for tag in self.selected_shapes_tag:
             self.shape.alpha=int(float(val)*255)
             self.shape.change_draw_color(self.image_specs[tag].color)
             self.shape.border_width=self.image_specs[tag].border_width
-            images.append(self.image_specs[tag].tk_image)
             self.update_shape(tag)
             self.image_specs[tag].opacity=self.shape.alpha
-
-        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
-        self.history.append(create_action)
-        
+   
     def change_border_width(self,val):
-        images=[]
         for tag in self.selected_shapes_tag:
             self.shape.border_width=30-int(val)
             self.shape.change_draw_color(self.image_specs[tag].color)
             self.shape.alpha=self.image_specs[tag].opacity
-            images.append(self.image_specs[tag].tk_image)
             self.update_shape(tag)
             self.image_specs[tag].border_width=self.shape.border_width
         
-        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
-        self.history.append(create_action)
-
     def change_shape_color(self, color):
         if not self.selected_shapes_tag:
             self.shape.change_draw_color([int(color[i:i+2], 16) for i in (1, 3, 5)])
@@ -840,6 +831,15 @@ class EditShapes:
             self.shape.alpha=self.image_specs[tag].opacity
             self.shape.border_width=self.image_specs[tag].border_width
             self.update_shape(tag)
+
+        create_action=Action("change",self.selected_shapes_tag,tk_images=images)
+        self.history.append(create_action)
+
+    def save_state_of_shapes(self,_):
+        images=[]
+        for tag in self.selected_shapes_tag:
+            images.append(self.image_specs[tag].tk_image)
+
 
         create_action=Action("change",self.selected_shapes_tag,tk_images=images)
         self.history.append(create_action)
@@ -1035,6 +1035,7 @@ class EditShapes:
 class DrawApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.withdraw()
         self.title("Figures art")
         self.iconbitmap("images/others/main.ico")
         self.geometry("1200x600")
@@ -1142,6 +1143,7 @@ class DrawApp(tk.Tk):
 
         #option menu
         self.settings_menu()
+        self.deiconify() 
     
     def pick_color(self):
         color = askcolor()
@@ -1219,12 +1221,14 @@ class DrawApp(tk.Tk):
 
         #opacity slider
         start_var = tk.DoubleVar(value=1)
-        opacity_slider = tk.Scale(sliders_frame, from_=1, to=0, resolution=0.1,variable=start_var, orient='horizontal',command=self.edit_shape.change_opacity)
-        opacity_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
+        self.opacity_slider = tk.Scale(sliders_frame, from_=1, to=0, resolution=0.1,variable=start_var, orient='horizontal',command=self.edit_shape.change_opacity)
+        self.opacity_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
+        self.opacity_slider.bind("<ButtonPress-1>", self.edit_shape.save_state_of_shapes)
         
         start_var = tk.DoubleVar(value=9)
-        border_slider = tk.Scale(sliders_frame, from_=30, to=0, orient='horizontal',variable=start_var,command=self.edit_shape.change_border_width)
-        border_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
+        self.border_slider = tk.Scale(sliders_frame, from_=30, to=0, orient='horizontal',variable=start_var,command=self.edit_shape.change_border_width)
+        self.border_slider.pack(side=tk.BOTTOM, fill=tk.Y,padx=10)
+        self.border_slider.bind("<ButtonPress-1>", self.edit_shape.save_state_of_shapes)
 
 
         custom_font = ("Helvetica", 9,"bold")
