@@ -4,6 +4,7 @@ from tkinter import filedialog
 from PIL import Image, ImageTk, ImageDraw
 import os
 import copy
+import pickle
 
 COLORS = [
     (0, 0, 0),
@@ -918,6 +919,75 @@ class EditShapes:
         self.copy_shapes("")
         self.delete_shapes()
 
+    def dump_session(self):
+        canvas_data = {
+            "items": []
+        }
+        self.canvas.delete("border","bottom_btn","top_btn","left_btn","right_btn")        
+        items = self.canvas.find_all()
+
+        for item in items:
+            tag=self.canvas.gettags(item)[0]
+            image_bbox = self.canvas.bbox(item)
+            image_width = image_bbox[2] - image_bbox[0]
+            image_height = image_bbox[3] - image_bbox[1]
+            img_specs=self.image_specs[tag]
+            item_data = {
+                "tag":tag,
+                "size":[image_width,image_height],
+                "coords": self.canvas.coords(item),
+                "specs":{
+                    "shape_type":img_specs.shape_type,
+                    "shape_color":img_specs.color,
+                    "shape_border_width":img_specs.border_width,
+                    "shape_opacity":img_specs.opacity,
+                    "shape_angle":img_specs.angle,
+                    }
+            }
+            canvas_data["items"].append(item_data)
+        file_path = filedialog.asksaveasfilename(initialdir=os.getcwd(), filetypes=(('PKL Files', '*.pkl'),))
+        file = open(file_path+".pkl", "wb")
+        pickle.dump(canvas_data,file)
+  
+    def load_session(self):
+        file_path = filedialog.askopenfile(initialdir=os.getcwd(), filetypes=(('PKL Files', '*.pkl'),))
+        file = open(file_path.name, "rb")
+        data=pickle.load(file)
+        self.image_specs.clear()
+        self.canvas.delete("all")
+        for shape in data["items"]:
+            self.shape_counter+=1
+            specs=shape["specs"]
+            tag=shape["tag"]
+            x,y=shape["coords"]
+            w,h=shape["size"]
+            self.shape.change_draw_color(specs["shape_color"])
+            self.shape.alpha=specs["shape_opacity"]
+            self.shape.border_width=specs["shape_border_width"]
+            match specs["shape_type"]:
+                case "star":
+                    self.shape.draw_star()
+                case "rectangle":
+                    self.shape.draw_rectangle()
+                case "circle":
+                    self.shape.draw_circle()
+                case "pentagon":
+                    self.shape.draw_pentagon()
+                case "arrow":
+                    self.shape.draw_arrow()
+                case "triangle":
+                    self.shape.draw_triangle()
+            
+            self.image_tk = ImageTk.PhotoImage(self.shape.image.rotate(specs["shape_angle"],expand=False).resize((w, h), Image.BILINEAR))
+            
+            img_specs=ImageSpecs(specs["shape_type"],specs["shape_color"],specs["shape_border_width"],specs["shape_opacity"],self.image_tk)
+            self.image_specs[tag]=img_specs
+            self.image_specs[tag].angle=specs["shape_angle"]
+            image_object=self.canvas.create_image(x,y, image=img_specs.tk_image, anchor=tk.NW,tag=tag)
+            self.canvas.tag_bind(image_object, "<ButtonPress-1>",lambda event,tag=tag: self.selected_shape(event,tag))
+            self.canvas.tag_bind(image_object, "<B1-Motion>",self.drag_shape)
+            self.canvas.tag_bind(image_object, "<ButtonRelease-1>",self.stop_drag_shape)
+
     def undo(self):
         if self.history:
             prev_action=self.history[len(self.history)-1]
@@ -946,7 +1016,6 @@ class EditShapes:
            #print(prev_action.action_name)
             self.history.pop()
             
-
     def short_cuts(self,event):
         if event.keysym =='Delete':
             self.delete_shapes()
@@ -1286,6 +1355,7 @@ class DrawApp(tk.Tk):
     
     def rotate_buttons(self,side):
         self.edit_shape.rotate_shape(side*int(self.input_field.get()))
+        self.focus_set()
 
     def donothing(self):
         print("nothing")
@@ -1297,6 +1367,8 @@ class DrawApp(tk.Tk):
         filemenu.add_command(label="Open", command=self.edit_shape.open_image)
         filemenu.add_command(label="Save", command=self.edit_shape.quick_save)
         filemenu.add_command(label="Save as...", command=self.edit_shape.save_as)
+        filemenu.add_command(label="Export session", command=self.edit_shape.dump_session)
+        filemenu.add_command(label="Load session", command=self.edit_shape.load_session)
         filemenu.add_command(label="Close", command=self.donothing)
 
         filemenu.add_separator()
