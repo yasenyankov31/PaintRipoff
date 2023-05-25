@@ -1017,14 +1017,15 @@ class EditShapes:
             self.history.pop()
             
     def short_cuts(self,event):
+        ctrl  = (event.state & 0x4) != 0
         if event.keysym =='Delete':
             self.delete_shapes()
 
-        if event.state==4 or event.state==12:
+        if ctrl:
             if event.keysym == 's' :  # Check for Control+S
                 self.quick_save()
 
-            if event.keysym == 'a':
+            if event.keysym == 'a': 
                 self.select_all_shapes()
 
             if event.keysym == 'x':
