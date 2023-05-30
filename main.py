@@ -126,170 +126,26 @@ class Shape:
         self.image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         self.draw = ImageDraw.Draw(self.image)
     
-    def draw_rhombus(self):
-        self.reset_image()
-        x0, y0 = 200, 50
-        x1, y1 = 350, 200
-        x2, y2 = 200, 350
-        x3, y3 = 50, 200
-
-        # Draw the rhombus outline
-        self.draw.polygon([(x0, y0), (x1, y1), (x2, y2), (x3, y3)], outline="black")
-
-        # Draw the diagonals
-        self.draw.line([(x0, y3), (x2, y2)], fill="black")
-        self.draw.line([(x1, y1), (x3, y3)], fill="black")
-
-    def draw_circle_with_diagonals(self):
-        self.reset_image()
-        # Define the circle center and radius
-        center_x = 200
-        center_y = 200
-        radius = 150
-
-        # Draw the circle outline
-        self.draw.ellipse([(center_x - radius, center_y - radius), (center_x + radius, center_y + radius)], outline="black")
-
-        # Calculate the diagonal points
-        x1 = center_x - radius
-        y1 = center_y
-        x2 = center_x + radius
-        y2 = center_y
-        x3 = center_x
-        y3 = center_y - radius
-        x4 = center_x
-        y4 = center_y + radius
-
-        # Rotate the diagonal points by 90 degrees
-        angle = math.radians(90)
-        rotated_x1 = center_x + math.cos(angle) * (x1 - center_x) - math.sin(angle) * (y1 - center_y)
-        rotated_y1 = center_y + math.sin(angle) * (x1 - center_x) + math.cos(angle) * (y1 - center_y)
-        rotated_x2 = center_x + math.cos(angle) * (x2 - center_x) - math.sin(angle) * (y2 - center_y)
-        rotated_y2 = center_y + math.sin(angle) * (x2 - center_x) + math.cos(angle) * (y2 - center_y)
-        rotated_x3 = center_x + math.cos(angle) * (x3 - center_x) - math.sin(angle) * (y3 - center_y)
-        rotated_y3 = center_y + math.sin(angle) * (x3 - center_x) + math.cos(angle) * (y3 - center_y)
-        rotated_x4 = center_x + math.cos(angle) * (x4 - center_x) - math.sin(angle) * (y4 - center_y)
-        rotated_y4 = center_y + math.sin(angle) * (x4 - center_x) + math.cos(angle) * (y4 - center_y)
-
-        # Draw the rotated diagonals
-        self.draw.line([(rotated_x1, rotated_y1), (rotated_x2, rotated_y2)], fill="black")
-        self.draw.line([(rotated_x3, rotated_y3), (rotated_x4, rotated_y4)], fill="black")
-
-        center_line_start = (center_x - radius + 1, center_y)
-        center_line_end = (center_x + radius - 1, center_y)
-        self.draw.line([center_line_start, center_line_end], fill="black")
-
-    def draw_circle_with_2d_1h(self):
-        self.reset_image()
-        center_x = self.width // 2
-        center_y = self.height // 2
-        radius = 150
-
-        # Draw the circle outline
-        self.draw.ellipse([(center_x - radius, center_y - radius), (center_x + radius, center_y + radius)], outline="black")
-
-        # Calculate the diagonal points
-        shortening_factor = 0.7
-        x1 = center_x - radius * shortening_factor
-        y1 = center_y - radius * shortening_factor
-        x2 = center_x + radius * shortening_factor
-        y2 = center_y + radius * shortening_factor
-        x3 = center_x - radius * shortening_factor
-        y3 = center_y + radius * shortening_factor
-        x4 = center_x + radius * shortening_factor
-        y4 = center_y - radius * shortening_factor
-
-        # Draw the diagonals
-        self.draw.line([(x1, y1), (x2, y2)], fill="black")
-        self.draw.line([(x3, y3), (x4, y4)], fill="black")
-
-        # Draw the horizontal line
-        line1_start = (center_x, center_y - radius + 1)
-        line1_end = (center_x, center_y + radius - 1)
-        self.draw.line([line1_start, line1_end], fill="black")
-
-    def draw_circle_2v_1h(self):
-        self.reset_image()
-        # Define the circle's properties
-        center = (200, 200)
-        radius = 150
-        circle_color = (0, 0, 0)  # Black
-        line_width = 2
-
-        # Draw the circle
-        self.draw.ellipse([(center[0] - radius, center[1] - radius),
-                    (center[0] + radius, center[1] + radius)],
-                    outline=circle_color, width=line_width)
-
-        # Define the lines' properties
-        line_color = (0, 0, 0)  # Black
-
-
-        line2_start = (center[0] - radius, center[1])
-        line2_end = (center[0] + radius, center[1])
-        self.draw.line([line2_start, line2_end], fill=line_color, width=line_width)
-
-        line3_start = (center[0] - radius, center[1] - radius)
-        line3_end = (center[0] - radius, center[1] + radius)
-        self.draw.line([line3_start, line3_end], fill=line_color, width=line_width)
-
-        line4_start = (center[0] + radius, center[1] - radius)
-        line4_end = (center[0] + radius, center[1] + radius)
-        self.draw.line([line4_start, line4_end], fill=line_color, width=line_width)
-
-    def draw_circle_3v_1h(self):
-        center = (200, 200)
-        radius = 150
-        circle_color = (0, 0, 0)  # Black
-        line_width = 2
-        offset=36
-
-        # Draw the circle
-        self.draw.ellipse([(center[0] - radius, center[1] - radius),
-                    (center[0] + radius, center[1] + radius)],
-                    outline=circle_color, width=line_width)
-
-        # Define the lines' properties
-        line_color = (0, 0, 0)  # Black
-
-        # Draw the vertical lines
-        line1_start = (center[0], center[1] - radius + line_width // 2)
-        line1_end = (center[0], center[1] + radius - line_width // 2)
-        self.draw.line([line1_start, line1_end], fill=line_color, width=line_width)
-
-        line3_start = (center[0] - radius // 1.5 + line_width // 2, center[1] - radius+offset  + line_width // 2)
-        line3_end = (center[0] - radius // 1.5 + line_width // 2, center[1] + radius-offset  - line_width // 2)
-        self.draw.line([line3_start, line3_end], fill=line_color, width=line_width)
-
-        line4_start = (center[0] + radius//1.5 - line_width // 2, center[1] - radius+offset + line_width // 2)
-        line4_end = (center[0] + radius//1.5 - line_width // 2, center[1] + radius-offset - line_width // 2)
-        self.draw.line([line4_start, line4_end], fill=line_color, width=line_width)
-
-        # Draw the central horizontal line
-        center_line_start = (center[0] - radius + line_width // 2, center[1])
-        center_line_end = (center[0] + radius - line_width // 2, center[1])
-        self.draw.line([center_line_start, center_line_end], fill=line_color, width=line_width)
-
     def rotate_point(self,x, y, cx, cy, angle):
         # Rotate a point (x, y) around a center point (cx, cy) by a given angle (in radians)
         rotated_x = math.cos(angle) * (x - cx) - math.sin(angle) * (y - cy) + cx
         rotated_y = math.sin(angle) * (x - cx) + math.cos(angle) * (y - cy) + cy
         return int(rotated_x), int(rotated_y)
     
-    def draw_circle_2v_r270(self):
+    def draw_new_circle(self):
+        self.reset_image()
         center = (200, 200)
         radius = 150
-        circle_color = (0, 0, 0)  # Black
-        line_width = 2
+        line_width =int(self.border_width/ 4)
         offset = 20
 
         # Draw the circle
         self.draw.ellipse([(center[0] - radius, center[1] - radius),
                         (center[0] + radius, center[1] + radius)],
-                        outline=circle_color, width=line_width)
+                        outline=(self.draw_color[0], self.draw_color[1], self.draw_color[2], self.alpha), width=self.border_width)
 
         # Define the lines' properties
-        line_color = (0, 0, 0)  # Black
+        line_color = (self.draw_color[0], self.draw_color[1], self.draw_color[2], self.alpha)
 
         # Rotate angle in degrees
         rotate_angle = 110
@@ -579,6 +435,8 @@ class EditShapes:
                     self.shape.draw_arrow()
                 case "triangle":
                     self.shape.draw_triangle()
+                case"new_circle":
+                    self.shape.draw_new_circle()
 
         else:
             self.selection_rectangle = (int(self.canvas.canvasx(event.x)), int(self.canvas.canvasy(event.y)), int(self.canvas.canvasx(event.x)), int(self.canvas.canvasy(event.y)))
@@ -1016,6 +874,8 @@ class EditShapes:
                 self.shape.draw_arrow()
             case "triangle":
                 self.shape.draw_triangle()
+            case"new_circle":
+                self.shape.draw_new_circle()
 
 
         self.img_specs.angle%=360
